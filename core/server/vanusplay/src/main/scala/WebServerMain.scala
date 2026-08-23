@@ -155,7 +155,15 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
 
   override def serve(session: IHTTPSession): Response =
     val headers = session.getHeaders
-    if !quiet then println(session.getMethod.toString + " '" + session.getUri + "'")
+    val parms = session.getParms
+    if !quiet then
+      println(session.getMethod.toString + " '" + session.getUri + "' ")
+      headers.asScala.foreach { case (name, value) =>
+        println("  HDR: '" + name + "' = '" + value + "'")
+      }
+      parms.asScala.foreach { case (name, value) =>
+        println("  PRM: '" + name + "' = '" + value + "'")
+      }
     val roots = rootDirs.iterator()
     while roots.hasNext do
       val root = roots.next()
