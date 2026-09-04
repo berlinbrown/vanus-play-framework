@@ -1,6 +1,9 @@
 object VanusConstants:
+  // Main Port setting
   val DefaultPort = 8080
 
+
+  // Main Argument Settings
   val ArgPort = "-p"
   val ArgPortLong = "--port"
   val ArgHost = "-h"
@@ -11,14 +14,17 @@ object VanusConstants:
   val ArgDirLong = "--dir"
   val ArgCors = "--cors"
 
+  // Additional Option Settings
   val OptionHost = "host"
   val OptionPort = "port"
   val OptionQuiet = "quiet"
   val OptionHome = "home"
 
+  // Default Index Files
   val DefaultIndexHtml = "index.html"
   val DefaultIndexHtm = "index.htm"
 
+  // Header Setting Accept
   val HeaderAcceptRanges = "Accept-Ranges"
   val HeaderLocation = "Location"
   val HeaderContentLength = "Content-Length"
@@ -26,7 +32,9 @@ object VanusConstants:
   val HeaderETag = "ETag"
   val HeaderIfNoneMatch = "if-none-match"
   val HeaderRange = "range"
-  val HeaderXServerVanusInfo = "X-Server-Vanus-Info"
+
+  // True server info - X-Server-Vanus-Info
+  val HeaderXServerVanusInfo = "X-Server-Z-Info"
   val HeaderContentSecurityPolicy = "Content-Security-Policy"
   val HeaderAccessControlAllowOrigin = "Access-Control-Allow-Origin"
   val HeaderAccessControlAllowHeaders = "Access-Control-Allow-Headers"
@@ -34,14 +42,15 @@ object VanusConstants:
   val HeaderAccessControlAllowMethods = "Access-Control-Allow-Methods"
   val HeaderAccessControlMaxAge = "Access-Control-Max-Age"
 
+  // CORS (Cross-Origin Resource Sharing) Settings
   val CorsAllowedHeadersProperty = "AccessControlAllowHeader"
   val CorsAllowedHeadersDefault = "origin,accept,content-type"
   val CorsAllowCredentialsValue = "true"
   val CorsAllowMethodsValue = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
   val CorsWildcard = "*"
   val CorsMaxAgeSeconds = 151200
-
-  val VanusVersionValue = "\"Version 1.0\""
+ 
+  val VanusVersionValue = "\"vers 0.1\""
   val ContentSecurityPolicyValue = "script-src 'none'"
 
   val ErrorForbiddenTraversal = "Won't serve ../ for security reasons."

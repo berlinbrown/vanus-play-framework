@@ -5,9 +5,7 @@ import org.nanohttpd.protocols.http.response.IStatus
 
 object VanusFileResponses:
   def fixedResponse(status: IStatus, mime: String, message: String): Response =
-    val response = Response.newFixedLengthResponse(status, mime, message)
-    response.addHeader(VanusConstants.HeaderAcceptRanges, "bytes")
-    response
+    withCommonHeaders(Response.newFixedLengthResponse(status, mime, message), mime)
 
   def serveFile(headers: java.util.Map[String, String], file: File, mime: String): Response =
     try
@@ -36,17 +34,25 @@ object VanusFileResponses:
         val length = math.max(0L, endAt - startFrom + 1)
         val stream = new FileInputStream(file)
         stream.skip(startFrom)
-        val response = Response.newFixedLengthResponse(Status.PARTIAL_CONTENT, mime, stream, length)
+        val response = withCommonHeaders(Response.newFixedLengthResponse(Status.PARTIAL_CONTENT, mime, stream, length), mime)
         response.addHeader(VanusConstants.HeaderContentRange, s"bytes $startFrom-$endAt/$fileLength")
         response.addHeader(VanusConstants.HeaderETag, etag)
         response
       else
-        val response = Response.newFixedLengthResponse(Status.OK, mime, new FileInputStream(file), fileLength)
-        response.addHeader(VanusConstants.HeaderAcceptRanges, "bytes")
+        val response = withCommonHeaders(Response.newFixedLengthResponse(Status.OK, mime, new FileInputStream(file), fileLength), mime)
         response.addHeader(VanusConstants.HeaderContentLength, fileLength.toString)
         response.addHeader(VanusConstants.HeaderETag, etag)
         response
     catch case _: IOException | _: NumberFormatException => forbidden(VanusConstants.ErrorReadingFileFailed)
+
+  private def withCommonHeaders(response: Response, mime: String): Response =
+    response.addHeader(VanusConstants.HeaderAcceptRanges, "bytes")
+    if isHtmlMime(mime) then
+      response.addHeader(VanusConstants.HeaderContentSecurityPolicy, VanusConstants.ContentSecurityPolicyValue)
+    response
+
+  private def isHtmlMime(mime: String): Boolean =
+    Option(mime).exists(_.toLowerCase.contains("html"))
 
   private def forbidden(message: String): Response =
     Response.newFixedLengthResponse(Status.FORBIDDEN, NanoHTTPD.MIME_PLAINTEXT, VanusConstants.ErrorForbiddenPrefix + message)

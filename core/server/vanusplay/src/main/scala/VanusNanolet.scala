@@ -6,6 +6,10 @@ import scala.jdk.CollectionConverters.*
 trait NanoletHandler:
   def get(session: IHTTPSession): Response
 
+/**
+ * A trait representing a handler for NanoHTTPD requests.
+ * Implementations should provide a method to handle GET requests.
+ */
 abstract class DefaultHandler extends NanoletHandler:
   def getText(session: IHTTPSession): String
   def getMimeType: String

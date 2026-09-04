@@ -73,7 +73,8 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
   private def respondFromDirectory(headers: Map[String, String], session: IHTTPSession, uri: String, file: File): Response =
     val indexFile = VanusDirectory.findIndexFileInDirectory(file, WebServerMain.indexFileNames)
     if indexFile == null then
-      if file.canRead then VanusFileResponses.fixedResponse(Status.OK, NanoHTTPD.MIME_HTML, VanusDirectory.listDirectory(uri, file))
+      if file.canRead then VanusFileResponses.fixedResponse(Status.OK, NanoHTTPD.MIME_HTML, 
+            VanusDirectory.listDirectory(uri, file))
       else forbidden(VanusConstants.ErrorNoDirectoryListing)
     else
       respond(headers, session, uri + indexFile)
