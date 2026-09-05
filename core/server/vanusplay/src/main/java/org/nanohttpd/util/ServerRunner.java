@@ -55,9 +55,16 @@ public class ServerRunner {
         }
 
         System.out.println("Server started, Hit Enter to stop.\n");
+        System.out.flush();
 
         try {
-            System.in.read();
+            if (System.console() != null) {
+                // Interactive terminal: wait for Enter to stop.
+                System.in.read();
+            } else {
+                // No terminal (scripted/background): run until the JVM exits.
+                Thread.currentThread().join();
+            }
         } catch (Throwable ignored) {
         }
 

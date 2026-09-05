@@ -25,19 +25,28 @@ object WebServerMain:
   def main(args: Array[String]): Unit =
     val config = VanusServerConfig.fromArgs(args)
     VanusPlugins.registerAvailablePlugins(mimeTypeHandlers, indexFileNames, config.options.asJava)
-    ServerRunner.executeInstance(new WebServer(config.host, config.port, config.rootDirs.asJava, config.quiet, config.cors.orNull))
+    ServerRunner.executeInstance(new WebServer(config.host, config.port, config.rootDirs.asJava, config.quiet, config.dirListing, config.rateLimit.map(Integer.valueOf).orNull, config.cors.orNull))
 
-class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, cors: String)
+class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, dirListing: Boolean, rateLimit: Integer, cors: String)
     extends NanoHTTPD(host, port):
 
   private val rootDirs = wwwroots.asScala.toVector
   private val corsOption = Option(cors)
+  private val rateLimiter = Option(rateLimit).map(limit => new VanusRateLimiter(limit.intValue, VanusConstants.RateLimitWindowMillis))
 
   override def serve(session: IHTTPSession): Response =
     logRequest(session)
+    if isRateLimited(session) then
+      return Response.newFixedLengthResponse(Status.TOO_MANY_REQUESTS, NanoHTTPD.MIME_PLAINTEXT, "Too Many Requests")
     rootDirs.find(!_.isDirectory) match
       case Some(root) => internalError(s"given path is not a directory ($root).")
       case None => respond(session.getHeaders, session, session.getUri)
+
+  private def isRateLimited(session: IHTTPSession): Boolean =
+    rateLimiter.exists { limiter =>
+      val clientKey = Option(session.getHeaders.get("remote-addr")).getOrElse("unknown")
+      !limiter.allow(clientKey)
+    }
 
   private def respond(headers: Map[String, String], session: IHTTPSession, uri: String): Response =
     val response =
@@ -57,7 +66,7 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
     if uri.contains("../") then return forbidden(VanusConstants.ErrorForbiddenTraversal)
 
     rootDirs.find(root => canServeUri(uri, root)) match
-      case None => notFound
+      case None => logNotFound(uri); notFound
       case Some(root) => respondFromRoot(headers, session, uri, root)
 
   private def respondFromRoot(headers: Map[String, String], session: IHTTPSession, uri: String, homeDir: File): Response =
@@ -73,13 +82,14 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
   private def respondFromDirectory(headers: Map[String, String], session: IHTTPSession, uri: String, file: File): Response =
     val indexFile = VanusDirectory.findIndexFileInDirectory(file, WebServerMain.indexFileNames)
     if indexFile == null then
-      if file.canRead then VanusFileResponses.fixedResponse(Status.OK, NanoHTTPD.MIME_HTML, 
+      if !dirListing || !file.canRead then forbidden(VanusConstants.ErrorNoDirectoryListing)
+      else VanusFileResponses.fixedResponse(Status.OK, NanoHTTPD.MIME_HTML,
             VanusDirectory.listDirectory(uri, file))
-      else forbidden(VanusConstants.ErrorNoDirectoryListing)
     else
       respond(headers, session, uri + indexFile)
 
   private def respondFromFile(headers: Map[String, String], session: IHTTPSession, uri: String, homeDir: File, file: File): Response =
+    logResolvedFile(file, session)
     val mime = NanoHTTPD.getMimeTypeForFile(uri)
     val plugin = WebServerMain.mimeTypeHandlers.get(mime)
 
@@ -93,7 +103,13 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
 
   private def canServeUri(uri: String, homeDir: File): Boolean =
     val file = new File(homeDir, uri)
-    file.exists || Option(WebServerMain.mimeTypeHandlers.get(NanoHTTPD.getMimeTypeForFile(uri))).exists(_.canServeUri(uri, homeDir))
+    isWithinRoot(file, homeDir) &&
+      (file.exists || Option(WebServerMain.mimeTypeHandlers.get(NanoHTTPD.getMimeTypeForFile(uri))).exists(_.canServeUri(uri, homeDir)))
+
+  private def isWithinRoot(file: File, homeDir: File): Boolean =
+    val rootPath = homeDir.getCanonicalFile.toPath
+    val targetPath = file.getCanonicalFile.toPath
+    targetPath.startsWith(rootPath)
 
   private def normalizeUri(originalUri: String): String =
     val withoutQuery = originalUri.indexOf('?') match
@@ -103,13 +119,28 @@ class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, c
 
   private def logRequest(session: IHTTPSession): Unit =
     if quiet then return
+    val requestHost = Option(session.getHeaders.get("host")).getOrElse(s"$host:$port")
     println(session.getMethod.toString + " '" + session.getUri + "' ")
+    println(s"  URL: http://$requestHost${session.getUri}")
     session.getHeaders.asScala.foreach { case (name, value) =>
       println(s"  HDR: '$name' = '$value'")
     }
     session.getParms.asScala.foreach { case (name, value) =>
       println(s"  PRM: '$name' = '$value'")
     }
+    System.out.flush()
+
+  private def logResolvedFile(file: File, session: IHTTPSession): Unit =
+    if !quiet && file.isFile then
+      println(s"  FILE: ${file.getAbsolutePath}")
+      System.out.flush()
+
+  private def logNotFound(uri: String): Unit =
+    if quiet then return
+    rootDirs.foreach { root =>
+      println(s"  404: tried ${new File(root, uri).getAbsolutePath}")
+    }
+    System.out.flush()
 
   private def redirectTo(uri: String): Response =
     val response = VanusFileResponses.fixedResponse(Status.REDIRECT, NanoHTTPD.MIME_HTML,

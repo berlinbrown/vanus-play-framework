@@ -1,4 +1,4 @@
-## sbt project compiled with Scala 3
+## sbt project compiled with Scala 3 (targets Java 21 bytecode)
 
 ### Development - Usage
 
@@ -29,6 +29,14 @@ Arguments are passed to `WebServerMain`, for example:
 ```bash
 ./scripts/launch-local.sh -p 8080 -d .
 ```
+
+Useful flags:
+
+- `-h` / `--host` — bind address (defaults to `127.0.0.1`, localhost only; pass a LAN address to share)
+- `-q` / `--quiet` — suppress request logging
+- `--cors` / `--cors=origin` — enable CORS headers
+- `--dir-listing` — list directory contents when no index file exists (off by default)
+- `--rate-limit <n>` — allow at most `n` requests per client IP per 10-second window (off by default); excess requests get `429 Too Many Requests`
 
 ### Test coverage
 

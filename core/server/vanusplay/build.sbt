@@ -8,6 +8,10 @@ lazy val root = project
 
     scalaVersion := scala3Version,
 
+    // Target Java 21 bytecode so the JAR runs on a Java 21 server
+    Compile / scalacOptions += "-release:21",
+    Compile / javacOptions ++= Seq("--release", "21"),
+
     libraryDependencies ++= Seq(
       "org.scalameta" %% "munit" % "1.3.4" % Test,
       "com.github.sbt" % "junit-interface" % "0.13.3" % Test,

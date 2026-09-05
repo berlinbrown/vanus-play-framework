@@ -4,7 +4,7 @@ import java.util.{HashMap, Map as JMap}
 
 import org.nanohttpd.protocols.http.response.{Response, Status}
 
-class MyMainWebServerTest extends munit.FunSuite:
+class MySuite extends munit.FunSuite:
 
   test("example test that succeeds") {
     assertEquals(42, 42)
@@ -16,10 +16,12 @@ class MyMainWebServerTest extends munit.FunSuite:
     assertEquals(config.port, 8080)
     assertEquals(config.host, "127.0.0.1")
     assertEquals(config.quiet, false)
+    assertEquals(config.dirListing, false)
     assertEquals(config.cors, None)
     assertEquals(config.rootDirs.size, 1)
     assert(config.options.get("port").contains("8080"))
     assert(config.options.get("quiet").contains("false"))
+    assert(config.options.get("dir-listing").contains("false"))
     assert(config.options.get("home").exists(_.nonEmpty))
   }
 
@@ -45,6 +47,45 @@ class MyMainWebServerTest extends munit.FunSuite:
     val config = VanusServerConfig.fromArgs(Array("--cors"))
 
     assertEquals(config.cors, Some("*"))
+  }
+
+  test("server config enables directory listing with flag") {
+    val config = VanusServerConfig.fromArgs(Array("--dir-listing"))
+
+    assertEquals(config.dirListing, true)
+    assertEquals(config.options.get("dir-listing"), Some("true"))
+  }
+
+  test("server config parses rate limit") {
+    val config = VanusServerConfig.fromArgs(Array("--rate-limit", "50"))
+
+    assertEquals(config.rateLimit, Some(50))
+    assertEquals(config.options.get("rate-limit"), Some("50"))
+  }
+
+  test("server config has no rate limit by default") {
+    val config = VanusServerConfig.fromArgs(Array.empty)
+
+    assertEquals(config.rateLimit, None)
+  }
+
+  test("rate limiter allows up to the limit then blocks within the window") {
+    val limiter = new VanusRateLimiter(2, 1000L)
+    val now = 100000L
+
+    assertEquals(limiter.allow("client-a", now), true)
+    assertEquals(limiter.allow("client-a", now + 10), true)
+    assertEquals(limiter.allow("client-a", now + 20), false)
+    assertEquals(limiter.allow("client-b", now + 30), true)
+  }
+
+  test("rate limiter resets after the window") {
+    val limiter = new VanusRateLimiter(1, 1000L)
+    val now = 100000L
+
+    assertEquals(limiter.allow("client-a", now), true)
+    assertEquals(limiter.allow("client-a", now + 100), false)
+    assertEquals(limiter.allow("client-a", now + 1001), true)
   }
 
   test("routes can be registered and looked up") {
@@ -135,4 +176,22 @@ class MyMainWebServerTest extends munit.FunSuite:
       assertEquals(response.getHeader("etag"), etag)
     finally
       file.delete()
+  }
+
+  test("server rejects symlink targets outside the root") {
+    val root = Files.createTempDirectory("vanus-root").toFile
+    val outside = Files.createTempFile("vanus-outside", ".txt").toFile
+    val link = new File(root, "leak.txt")
+    try
+      Files.createSymbolicLink(link.toPath, outside.toPath)
+      val server = new WebServer(null, 0, java.util.Arrays.asList(root), true, false, null, null)
+      val field = classOf[WebServer].getDeclaredMethod("canServeUri", classOf[String], classOf[File])
+      field.setAccessible(true)
+
+      val canServeLink = field.invoke(server, "/leak.txt", root).asInstanceOf[Boolean]
+      assertEquals(canServeLink, false)
+    finally
+      link.delete()
+      outside.delete()
+      root.delete()
   }

@@ -40,27 +40,8 @@ class GeneralHandler extends DefaultHandler:
     
     // Test with JavaScript, it will not execute
     lines += "<html>"
-    lines += "  <script>"
-    lines += s"    console.log('${session.getUri}');"
-    lines += "  </script>"
     lines += "  <body>"
-    lines += s"    <h1>Url: ${session.getUri}</h1><br>"
-
-    val queryParams = session.getParms
-    if queryParams != null && !queryParams.isEmpty then
-      queryParams.asScala.foreach { case (key, value) =>
-        lines += s"    <p>Param '$key' = $value</p>"
-      }
-    else
-      lines += "    <p>no params in url</p><br>"
-
-    val headers = session.getHeaders
-    if headers != null && !headers.isEmpty then
-      lines += "    <h2>Headers</h2>"
-      headers.asScala.foreach { case (key, value) =>
-        lines += s"    <p>Header '$key' = $value</p>"
-      }
-
+    lines += s"    <h1>z data - Vanus Play Web Server</h1><br>"    
     lines += "  </body>"
     lines += "</html>"
     lines.result().mkString("\n")

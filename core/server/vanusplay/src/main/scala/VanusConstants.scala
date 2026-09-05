@@ -1,6 +1,7 @@
 object VanusConstants:
   // Main Port setting
   val DefaultPort = 8080
+  val DefaultHost = "127.0.0.1"
 
 
   // Main Argument Settings
@@ -10,6 +11,8 @@ object VanusConstants:
   val ArgHostLong = "--host"
   val ArgQuiet = "-q"
   val ArgQuietLong = "--quiet"
+  val ArgDirListing = "--dir-listing"
+  val ArgRateLimit = "--rate-limit"
   val ArgDir = "-d"
   val ArgDirLong = "--dir"
   val ArgCors = "--cors"
@@ -18,7 +21,12 @@ object VanusConstants:
   val OptionHost = "host"
   val OptionPort = "port"
   val OptionQuiet = "quiet"
+  val OptionDirListing = "dir-listing"
+  val OptionRateLimit = "rate-limit"
   val OptionHome = "home"
+
+  // Rate limiting
+  val RateLimitWindowMillis = 10000L
 
   // Default Index Files
   val DefaultIndexHtml = "index.html"
