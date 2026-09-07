@@ -54,12 +54,15 @@ object VanusConstants:
   val CorsAllowedHeadersProperty = "AccessControlAllowHeader"
   val CorsAllowedHeadersDefault = "origin,accept,content-type"
   val CorsAllowCredentialsValue = "true"
-  val CorsAllowMethodsValue = "GET, POST, PUT, DELETE, OPTIONS, HEAD"
+  val CorsAllowMethodsValue = "GET, HEAD, OPTIONS"
   val CorsWildcard = "*"
   val CorsMaxAgeSeconds = 151200
  
   val VanusVersionValue = "\"vers 0.1\""
-  val ContentSecurityPolicyValue = "script-src 'none'"
+  val ContentSecurityPolicyValue =
+    "default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; " +
+      "object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; " +
+      "form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin"
 
   val ErrorForbiddenTraversal = "Won't serve ../ for security reasons."
   val ErrorNoDirectoryListing = "No directory listing."

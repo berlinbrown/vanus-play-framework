@@ -3,156 +3,183 @@
  * Berlin Brown - 2026
  */
 import java.io.File
-import java.util.{HashMap, List, Map}
-
-import org.nanohttpd.protocols.http.{IHTTPSession, NanoHTTPD}
+import java.util.{ArrayList, HashMap, List as JList, Map as JMap}
+import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.LongAdder
+import java.util.logging.Logger
+import org.nanohttpd.protocols.http.{HttpLimits, IHTTPSession, NanoHTTPD}
 import org.nanohttpd.protocols.http.request.Method
-import org.nanohttpd.protocols.http.response.{IStatus, Response, Status}
-import org.nanohttpd.util.ServerRunner
+import org.nanohttpd.protocols.http.response.{Response, Status}
 import org.nanohttpd.webserver.{InternalRewrite, WebServerPlugin}
-
 import scala.jdk.CollectionConverters.*
+import scala.util.control.NonFatal
 
 object WebServerMain:
-  val indexFileNames: List[String] = new java.util.ArrayList[String]()
-  val mimeTypeHandlers: Map[String, WebServerPlugin] = new java.util.HashMap[String, WebServerPlugin]()
-
-  indexFileNames.add(VanusConstants.DefaultIndexHtml)
-  indexFileNames.add(VanusConstants.DefaultIndexHtm)
-
-  VanusRoutes.addRoute(VanusRoutes.systemInfoPath, new GeneralHandler())
-
   def main(args: Array[String]): Unit =
     val config = VanusServerConfig.fromArgs(args)
-    VanusPlugins.registerAvailablePlugins(mimeTypeHandlers, indexFileNames, config.options.asJava)
-    ServerRunner.executeInstance(new WebServer(config.host, config.port, config.rootDirs.asJava, config.quiet, config.dirListing, config.rateLimit.map(Integer.valueOf).orNull, config.cors.orNull))
+    val indices = new ArrayList[String](java.util.List.of("index.html", "index.htm"))
+    val plugins = new HashMap[String, WebServerPlugin]()
+    VanusPlugins.registerAvailablePlugins(plugins, indices, config.options.asJava)
+    val server = new WebServer(
+      host = config.host,
+      port = config.port,
+      wwwroots = config.rootDirs.asJava,
+      quiet = config.quiet,
+      dirListing = config.dirListing,
+      rateLimit = config.rateLimit.map(Integer.valueOf).orNull,
+      cors = config.cors.orNull,
+      maxConnections = config.maxConnections,
+      maxInFlight = config.maxInFlight,
+      shutdownMillis = config.shutdownMillis,
+      maxTempBytes = config.maxTempBytes,
+      limits = config.limits,
+      plugins = plugins.asScala.toMap,
+      indexNames = indices.asScala.toVector
+    )
+    VanusRuntime.run(server)
 
-class WebServer(host: String, port: Int, wwwroots: List[File], quiet: Boolean, dirListing: Boolean, rateLimit: Integer, cors: String)
-    extends NanoHTTPD(host, port):
-
-  private val rootDirs = wwwroots.asScala.toVector
+class WebServer(
+    host: String,
+    port: Int,
+    wwwroots: JList[File],
+    quiet: Boolean,
+    dirListing: Boolean,
+    rateLimit: Integer,
+    cors: String,
+    maxConnections: Int = 256,
+    maxInFlight: Int = 32,
+    shutdownMillis: Int = 10000,
+    limits: HttpLimits = HttpLimits.DEFAULT,
+    plugins: Map[String, WebServerPlugin] = Map.empty,
+    indexNames: Vector[String] = Vector("index.html", "index.htm"),
+    routes: Map[(Method, String), NanoletHandler] = VanusRoutes.snapshot,
+    maxTempBytes: Long = 64L * 1024 * 1024
+) extends NanoHTTPD(host, port):
+  require(maxInFlight > 0)
+  private val rootDirs = wwwroots.asScala.map(_.getCanonicalFile).toVector
+  require(rootDirs.nonEmpty && rootDirs.forall(root => root.isDirectory && root.canRead),
+    "Every document root must be a readable directory")
   private val corsOption = Option(cors)
-  private val rateLimiter = Option(rateLimit).map(limit => new VanusRateLimiter(limit.intValue, VanusConstants.RateLimitWindowMillis))
+  private val rateLimiter = Option(rateLimit).map { limit =>
+    new VanusRateLimiter(limit.intValue, VanusConstants.RateLimitWindowMillis)
+  }
+  private val connections = new VanusConnections(maxConnections, shutdownMillis)
+  private val requests = new Semaphore(maxInFlight)
+  private val requestCount = new LongAdder
+  private val rejectedCount = new LongAdder
+  private val log = Logger.getLogger("vanus.requests")
+  private val tempFiles = new VanusTempFiles(maxTempBytes, limits.maxBodyBytes(), limits.maxMultipartParts())
+  setTempFileManagerFactory(tempFiles)
+  setLimits(limits)
+  setAsyncRunner(connections)
+
+  def activeConnections: Int = connections.activeConnections
+  def rejectedConnections: Long = connections.rejectedConnections
+  def reservedTempBytes: Long = tempFiles.reservedBytes
+  def totalRequests: Long = requestCount.sum()
+  def rejectedRequests: Long = rejectedCount.sum()
+  def activeRequests: Int = maxInFlight - requests.availablePermits()
+
+  override def prepareResponse(response: Response): Response = VanusSecurity.protect(response)
 
   override def serve(session: IHTTPSession): Response =
-    logRequest(session)
-    if isRateLimited(session) then
-      return Response.newFixedLengthResponse(Status.TOO_MANY_REQUESTS, NanoHTTPD.MIME_PLAINTEXT, "Too Many Requests")
-    rootDirs.find(!_.isDirectory) match
-      case Some(root) => internalError(s"given path is not a directory ($root).")
-      case None => respond(session.getHeaders, session, session.getUri)
-
-  private def isRateLimited(session: IHTTPSession): Boolean =
-    rateLimiter.exists { limiter =>
-      val clientKey = Option(session.getHeaders.get("remote-addr")).getOrElse("unknown")
-      !limiter.allow(clientKey)
-    }
-
-  private def respond(headers: Map[String, String], session: IHTTPSession, uri: String): Response =
+    val started = System.nanoTime()
+    requestCount.increment()
     val response =
-      if corsOption.isDefined && Method.OPTIONS == session.getMethod then
-        Response.newFixedLengthResponse(Status.OK, NanoHTTPD.MIME_PLAINTEXT, null, 0)
+      if !requests.tryAcquire() then
+        rejectedCount.increment()
+        val busy = plain(Status.SERVICE_UNAVAILABLE, "Server busy")
+        busy.addHeader("Retry-After", "1")
+        busy.closeConnection(true)
+        busy
       else
-        defaultRespond(headers, session, uri)
-    VanusCors(response, corsOption)
+        try
+          if rateLimiter.exists(limiter => !limiter.allow(Option(session.getRemoteIpAddress).getOrElse("unknown"))) then
+            rejectedCount.increment()
+            val limited = plain(Status.TOO_MANY_REQUESTS, "Too Many Requests")
+            limited.addHeader("Retry-After", "10")
+            limited
+          else respond(session.getHeaders, session, session.getUri, 0)
+        catch
+          case error: NanoHTTPD.ResponseException =>
+            Response.newFixedLengthResponse(error.getStatus, "text/plain", error.getMessage)
+          case _: java.io.EOFException => plain(Status.BAD_REQUEST, "Incomplete request body")
+          case NonFatal(error) =>
+            log.log(java.util.logging.Level.WARNING, "Request failed", error)
+            plain(Status.INTERNAL_ERROR, "Internal server error")
+        finally requests.release()
+    val finalResponse = VanusCors(response, corsOption)
+    if !quiet then
+      val elapsed = (System.nanoTime() - started) / 1000000L
+      // Deliberately exclude query strings, credentials, headers, and filesystem paths.
+      log.info(s"method=${session.getMethod} status=${finalResponse.getStatus.getRequestStatus} handler_ms=$elapsed")
+    finalResponse
 
-  private def defaultRespond(headers: Map[String, String], session: IHTTPSession, originalUri: String): Response =
-    val uri = normalizeUri(originalUri)
-    VanusRoutes.find(uri) match
+  private def respond(headers: JMap[String, String], session: IHTTPSession, uri: String, depth: Int): Response =
+    if depth > 8 then return plain(Status.INTERNAL_ERROR, "Too many internal rewrites")
+    if uri == null || !uri.startsWith("/") || uri.startsWith("//") || uri.contains('\\') || uri.exists(_.isControl) then
+      return plain(Status.BAD_REQUEST, "Invalid request path")
+    if Option(session.getHeaders.get("host")).exists(value => value.isEmpty || value.contains(',') || value.exists(_.isWhitespace)) then
+      return plain(Status.BAD_REQUEST, "Invalid Host header")
+    val method = session.getMethod
+    val routeMethod = if method == Method.HEAD then Method.GET else method
+    val matching = routes.get((method, uri)).orElse(routes.get((routeMethod, uri)))
+    val methods = routes.keysIterator.collect { case (verb, path) if path == uri => verb }.toSet
+    val allowed = if methods.isEmpty then Set(Method.GET, Method.HEAD, Method.OPTIONS)
+      else methods ++ (if methods.contains(Method.GET) then Set(Method.HEAD, Method.OPTIONS) else Set(Method.OPTIONS))
+    if method == Method.OPTIONS then
+      val response = plain(Status.NO_CONTENT, "")
+      response.addHeader("Allow", allowed.toVector.map(_.toString).sorted.mkString(", "))
+      response
+    else matching match
       case Some(handler) => handler.get(session)
-      case None => respondToFileRequest(headers, session, uri)
+      case None if methods.nonEmpty || (method != Method.GET && method != Method.HEAD) =>
+        val response = plain(Status.METHOD_NOT_ALLOWED, "Method not allowed")
+        response.addHeader("Allow", allowed.toVector.map(_.toString).sorted.mkString(", "))
+        response
+      case None =>
+        if uri.split('/').contains("..") then return plain(Status.FORBIDDEN, "Path traversal is not allowed")
+        rootDirs.find(root => canServeUri(uri, root)) match
+          case None => plain(Status.NOT_FOUND, VanusConstants.ErrorNotFound)
+          case Some(root) => respondFromRoot(headers, session, uri, root, depth)
 
-  private def respondToFileRequest(headers: Map[String, String], session: IHTTPSession, uri: String): Response =
-    if uri.contains("../") then return forbidden(VanusConstants.ErrorForbiddenTraversal)
-
-    rootDirs.find(root => canServeUri(uri, root)) match
-      case None => logNotFound(uri); notFound
-      case Some(root) => respondFromRoot(headers, session, uri, root)
-
-  private def respondFromRoot(headers: Map[String, String], session: IHTTPSession, uri: String, homeDir: File): Response =
-    val file = new File(homeDir, uri)
-
-    if file.isDirectory && !uri.endsWith("/") then
-      redirectTo(uri + "/")
-    else if file.isDirectory then
-      respondFromDirectory(headers, session, uri, file)
+  private def respondFromRoot(headers: JMap[String, String], session: IHTTPSession,
+      uri: String, root: File, depth: Int): Response =
+    val file = resolve(root, uri)
+    if file.isDirectory then
+      if !uri.endsWith("/") then
+        val target = VanusDirectory.encodeUri(uri + "/")
+        val text = VanusSecurity.escapeHtml(target)
+        val response = VanusFileResponses.fixedResponse(Status.REDIRECT, "text/html",
+          s"""<html><body><a href="$text">$text</a></body></html>""")
+        response.addHeader("Location", target)
+        response
+      else
+        indexNames.find(name => !name.contains('/') && !name.contains('\\') &&
+          VanusSecurity.mimeType(name).contains("text/html") && new File(file, name).isFile) match
+          case Some(name) => respond(headers, session, uri + name, depth + 1)
+          case None if dirListing && file.canRead =>
+            VanusFileResponses.fixedResponse(Status.OK, "text/html", VanusDirectory.listDirectory(uri, file))
+          case None => plain(Status.FORBIDDEN, VanusConstants.ErrorNoDirectoryListing)
     else
-      respondFromFile(headers, session, uri, homeDir, file)
+      VanusSecurity.mimeType(uri) match
+        case None => plain(Status.FORBIDDEN, "File type is not allowed")
+        case Some(mime) =>
+          plugins.get(mime).filter(_.canServeUri(uri, root)) match
+            case Some(plugin) =>
+              plugin.serveFile(uri, headers, session, file, mime) match
+                case rewrite: InternalRewrite => respond(rewrite.getHeaders, session, rewrite.getUri, depth + 1)
+                case null => plain(Status.NOT_FOUND, VanusConstants.ErrorNotFound)
+                case response => response
+            case None => VanusFileResponses.serveFile(headers, file, mime, session.getMethod == Method.HEAD)
 
-  private def respondFromDirectory(headers: Map[String, String], session: IHTTPSession, uri: String, file: File): Response =
-    val indexFile = VanusDirectory.findIndexFileInDirectory(file, WebServerMain.indexFileNames)
-    if indexFile == null then
-      if !dirListing || !file.canRead then forbidden(VanusConstants.ErrorNoDirectoryListing)
-      else VanusFileResponses.fixedResponse(Status.OK, NanoHTTPD.MIME_HTML,
-            VanusDirectory.listDirectory(uri, file))
-    else
-      respond(headers, session, uri + indexFile)
+  private def resolve(root: File, uri: String): File = new File(root, uri.stripPrefix("/"))
 
-  private def respondFromFile(headers: Map[String, String], session: IHTTPSession, uri: String, homeDir: File, file: File): Response =
-    logResolvedFile(file, session)
-    val mime = NanoHTTPD.getMimeTypeForFile(uri)
-    val plugin = WebServerMain.mimeTypeHandlers.get(mime)
+  private def canServeUri(uri: String, root: File): Boolean =
+    val file = resolve(root, uri)
+    file.getCanonicalFile.toPath.startsWith(root.toPath) &&
+      (file.isFile || file.isDirectory ||
+        VanusSecurity.mimeType(uri).flatMap(plugins.get).exists(_.canServeUri(uri, root)))
 
-    if plugin != null && plugin.canServeUri(uri, homeDir) then
-      plugin.serveFile(uri, headers, session, file, mime) match
-        case rewrite: InternalRewrite => respond(rewrite.getHeaders, session, rewrite.getUri)
-        case null => notFound
-        case response => response
-    else
-      Option(VanusFileResponses.serveFile(headers, file, mime)).getOrElse(notFound)
-
-  private def canServeUri(uri: String, homeDir: File): Boolean =
-    val file = new File(homeDir, uri)
-    isWithinRoot(file, homeDir) &&
-      (file.exists || Option(WebServerMain.mimeTypeHandlers.get(NanoHTTPD.getMimeTypeForFile(uri))).exists(_.canServeUri(uri, homeDir)))
-
-  private def isWithinRoot(file: File, homeDir: File): Boolean =
-    val rootPath = homeDir.getCanonicalFile.toPath
-    val targetPath = file.getCanonicalFile.toPath
-    targetPath.startsWith(rootPath)
-
-  private def normalizeUri(originalUri: String): String =
-    val withoutQuery = originalUri.indexOf('?') match
-      case -1 => originalUri
-      case index => originalUri.substring(0, index)
-    withoutQuery.trim.replace(File.separatorChar, '/')
-
-  private def logRequest(session: IHTTPSession): Unit =
-    if quiet then return
-    val requestHost = Option(session.getHeaders.get("host")).getOrElse(s"$host:$port")
-    println(session.getMethod.toString + " '" + session.getUri + "' ")
-    println(s"  URL: http://$requestHost${session.getUri}")
-    session.getHeaders.asScala.foreach { case (name, value) =>
-      println(s"  HDR: '$name' = '$value'")
-    }
-    session.getParms.asScala.foreach { case (name, value) =>
-      println(s"  PRM: '$name' = '$value'")
-    }
-    System.out.flush()
-
-  private def logResolvedFile(file: File, session: IHTTPSession): Unit =
-    if !quiet && file.isFile then
-      println(s"  FILE: ${file.getAbsolutePath}")
-      System.out.flush()
-
-  private def logNotFound(uri: String): Unit =
-    if quiet then return
-    rootDirs.foreach { root =>
-      println(s"  404: tried ${new File(root, uri).getAbsolutePath}")
-    }
-    System.out.flush()
-
-  private def redirectTo(uri: String): Response =
-    val response = VanusFileResponses.fixedResponse(Status.REDIRECT, NanoHTTPD.MIME_HTML,
-      "<html><body>Redirected: <a href=\"" + uri + "\">" + uri + "</a></body></html>")
-    response.addHeader(VanusConstants.HeaderLocation, uri)
-    response
-
-  private def forbidden(message: String): Response =
-    Response.newFixedLengthResponse(Status.FORBIDDEN, NanoHTTPD.MIME_PLAINTEXT, VanusConstants.ErrorForbiddenPrefix + message)
-
-  private def internalError(message: String): Response =
-    Response.newFixedLengthResponse(Status.INTERNAL_ERROR, NanoHTTPD.MIME_PLAINTEXT, VanusConstants.ErrorInternalPrefix + message)
-
-  private def notFound: Response =
-    Response.newFixedLengthResponse(Status.NOT_FOUND, NanoHTTPD.MIME_PLAINTEXT, VanusConstants.ErrorNotFound)
+  private def plain(status: Status, message: String): Response =
+    Response.newFixedLengthResponse(status, NanoHTTPD.MIME_PLAINTEXT, message)

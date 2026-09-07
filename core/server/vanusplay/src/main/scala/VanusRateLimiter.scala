@@ -1,22 +1,25 @@
-import java.util.concurrent.ConcurrentHashMap
+/** Fixed windows with bounded client state. Unknown clients are rejected when the table is full. */
+final class VanusRateLimiter(maxRequests: Int, windowMillis: Long, maxClients: Int = 10000):
+  require(maxRequests > 0 && windowMillis > 0 && maxClients > 0)
 
-/**
- * Minimal fixed-window rate limiter, per client key.
- * Each client may make at most maxRequests within each windowMillis window.
- */
-class VanusRateLimiter(maxRequests: Int, windowMillis: Long):
+  private final case class Window(startMillis: Long, count: Int)
+  private val windows = scala.collection.mutable.HashMap.empty[String, Window]
+  private var nextCleanup = Long.MinValue
 
-  private final case class Window(var startMillis: Long, var count: Int)
+  def trackedClients: Int = synchronized { windows.size }
 
-  private val windows = new ConcurrentHashMap[String, Window]()
-
-  /** Returns true if the request is allowed, false if the limit is exceeded. */
-  def allow(key: String, nowMillis: Long = System.currentTimeMillis()): Boolean =
-    val window = windows.computeIfAbsent(key, _ => Window(nowMillis, 0))
-    window.synchronized {
-      if nowMillis - window.startMillis >= windowMillis then
-        window.startMillis = nowMillis
-        window.count = 0
-      window.count += 1
-      window.count <= maxRequests
-    }
+  def allow(key: String, nowMillis: Long = System.nanoTime() / 1000000L): Boolean = synchronized {
+    if nowMillis >= nextCleanup then
+      windows.filterInPlace((_, window) => nowMillis - window.startMillis < windowMillis)
+      nextCleanup = nowMillis + windowMillis
+    windows.get(key) match
+      case Some(window) if nowMillis - window.startMillis < windowMillis =>
+        if window.count >= maxRequests then false
+        else
+          windows.update(key, window.copy(count = window.count + 1))
+          true
+      case _ if windows.contains(key) || windows.size < maxClients =>
+        windows.update(key, Window(nowMillis, 1))
+        true
+      case _ => false
+  }

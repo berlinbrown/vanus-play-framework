@@ -96,8 +96,8 @@ class MyMainWebServerTest extends munit.FunSuite:
     val response = VanusCors(Response.newFixedLengthResponse(Status.OK, "text/plain", "ok"), Some("*"))
 
     assertEquals(response.getHeader("access-control-allow-origin"), "*")
-    assertEquals(response.getHeader("access-control-allow-credentials"), "true")
-    assertEquals(response.getHeader("access-control-allow-methods"), "GET, POST, PUT, DELETE, OPTIONS, HEAD")
+    assertEquals(response.getHeader("access-control-allow-credentials"), null)
+    assertEquals(response.getHeader("access-control-allow-methods"), "GET, HEAD, OPTIONS")
   }
 
   test("cors leaves response untouched when disabled") {
@@ -125,7 +125,9 @@ class MyMainWebServerTest extends munit.FunSuite:
     val file = Files.createTempFile("vanus-file-test", ".txt").toFile
     try
       Files.writeString(file.toPath, "hello")
-      val etag = Integer.toHexString((file.getAbsolutePath + file.lastModified + file.length).hashCode)
+      val initial = VanusFileResponses.serveFile(new HashMap[String, String](), file, "text/plain")
+      val etag = initial.getHeader("etag")
+      initial.close()
       val headers: JMap[String, String] = new HashMap[String, String]()
       headers.put("if-none-match", etag)
 

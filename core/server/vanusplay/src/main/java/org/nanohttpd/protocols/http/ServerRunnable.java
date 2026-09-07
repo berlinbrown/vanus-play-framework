@@ -48,9 +48,11 @@ public class ServerRunnable implements Runnable {
 
     private final int timeout;
 
-    private IOException bindException;
+    private volatile IOException bindException;
 
-    private boolean hasBinded = false;
+    private final java.util.concurrent.CountDownLatch bound = new java.util.concurrent.CountDownLatch(1);
+
+    private volatile boolean hasBinded = false;
 
     public ServerRunnable(NanoHTTPD httpd, int timeout) {
         this.httpd = httpd;
@@ -65,19 +67,35 @@ public class ServerRunnable implements Runnable {
         } catch (IOException e) {
             this.bindException = e;
             return;
+        } finally {
+            bound.countDown();
         }
         do {
+            Socket finalAccept = null;
             try {
-                final Socket finalAccept = httpd.getMyServerSocket().accept();
+                finalAccept = httpd.getMyServerSocket().accept();
                 if (this.timeout > 0) {
                     finalAccept.setSoTimeout(this.timeout);
                 }
                 final InputStream inputStream = finalAccept.getInputStream();
                 httpd.asyncRunner.exec(httpd.createClientHandler(finalAccept, inputStream));
-            } catch (IOException e) {
-                NanoHTTPD.LOG.log(Level.FINE, "Communication with the client broken", e);
+            } catch (IOException | RuntimeException e) {
+                NanoHTTPD.safeClose(finalAccept);
+                NanoHTTPD.LOG.log(Level.FINE, "Connection could not be accepted", e);
             }
         } while (!httpd.getMyServerSocket().isClosed());
+    }
+
+    public void awaitBind() throws IOException {
+        try {
+            if (!bound.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IOException("Timed out binding the server socket");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Interrupted while starting the server", e);
+        }
+        if (bindException != null) throw bindException;
     }
 
     public IOException getBindException() {

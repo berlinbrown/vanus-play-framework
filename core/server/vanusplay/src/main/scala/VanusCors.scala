@@ -7,7 +7,9 @@ object VanusCors:
       case Some(origin) =>
         response.addHeader(VanusConstants.HeaderAccessControlAllowOrigin, origin)
         response.addHeader(VanusConstants.HeaderAccessControlAllowHeaders, System.getProperty(VanusConstants.CorsAllowedHeadersProperty, VanusConstants.CorsAllowedHeadersDefault))
-        response.addHeader(VanusConstants.HeaderAccessControlAllowCredentials, VanusConstants.CorsAllowCredentialsValue)
-        response.addHeader(VanusConstants.HeaderAccessControlAllowMethods, VanusConstants.CorsAllowMethodsValue)
+        if origin != "*" then
+          response.addHeader(VanusConstants.HeaderAccessControlAllowCredentials, VanusConstants.CorsAllowCredentialsValue)
+        response.addHeader(VanusConstants.HeaderAccessControlAllowMethods,
+          Option(response.getHeader("allow")).getOrElse(VanusConstants.CorsAllowMethodsValue))
         response.addHeader(VanusConstants.HeaderAccessControlMaxAge, VanusConstants.CorsMaxAgeSeconds.toString)
         response

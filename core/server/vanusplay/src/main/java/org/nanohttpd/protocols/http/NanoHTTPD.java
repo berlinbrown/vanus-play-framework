@@ -36,11 +36,11 @@ package org.nanohttpd.protocols.http;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UnsupportedEncodingException;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.URL;
 import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.security.KeyStore;
 import java.util.ArrayList;
 import java.util.Enumeration;
@@ -339,6 +339,25 @@ public abstract class NanoHTTPD {
      */
     protected IAsyncRunner asyncRunner;
 
+    private HttpLimits limits = HttpLimits.DEFAULT;
+    private final java.util.concurrent.Semaphore bodyParsers = new java.util.concurrent.Semaphore(4);
+
+    public boolean acquireBodyParser() { return bodyParsers.tryAcquire(); }
+    public void releaseBodyParser() { bodyParsers.release(); }
+
+    public Response prepareResponse(Response response) { return response; }
+
+    public HttpLimits getLimits() { return limits; }
+
+    public void setLimits(HttpLimits limits) {
+        if (isAlive()) throw new IllegalStateException("Set limits before starting the server");
+        this.limits = java.util.Objects.requireNonNull(limits);
+    }
+
+    public void stopAccepting() {
+        safeClose(this.myServerSocket);
+    }
+
     /**
      * Pluggable strategy for creating and cleaning up temporary files.
      */
@@ -476,13 +495,7 @@ public abstract class NanoHTTPD {
      *         "foo bar"
      */
     public static String decodePercent(String str) {
-        String decoded = null;
-        try {
-            decoded = URLDecoder.decode(str, "UTF8");
-        } catch (UnsupportedEncodingException ignored) {
-            NanoHTTPD.LOG.log(Level.WARNING, "Encoding not supported, ignored", ignored);
-        }
-        return decoded;
+        return URLDecoder.decode(str, StandardCharsets.UTF_8);
     }
 
     public final int getListeningPort() {
@@ -606,17 +619,11 @@ public abstract class NanoHTTPD {
         this.myThread.setDaemon(daemon);
         this.myThread.setName("NanoHttpd Main Listener");
         this.myThread.start();
-        while (!serverRunnable.hasBinded() && serverRunnable.getBindException() == null) {
-            try {
-                Thread.sleep(10L);
-            } catch (Throwable e) {
-                // on android this may not be allowed, that's why we
-                // catch throwable the wait should be very short because we are
-                // just waiting for the bind of the socket
-            }
-        }
-        if (serverRunnable.getBindException() != null) {
-            throw serverRunnable.getBindException();
+        try {
+            serverRunnable.awaitBind();
+        } catch (IOException e) {
+            safeClose(this.myServerSocket);
+            throw e;
         }
     }
 

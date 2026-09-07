@@ -62,7 +62,7 @@ public class SecureServerSocketFactory implements IFactoryThrowing<ServerSocket,
         if (this.sslProtocols != null) {
             ss.setEnabledProtocols(this.sslProtocols);
         } else {
-            ss.setEnabledProtocols(ss.getSupportedProtocols());
+            ss.setEnabledProtocols(new String[] { "TLSv1.3", "TLSv1.2" });
         }
         ss.setUseClientMode(false);
         ss.setWantClientAuth(false);

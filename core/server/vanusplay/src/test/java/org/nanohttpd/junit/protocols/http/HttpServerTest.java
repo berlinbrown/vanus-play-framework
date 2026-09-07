@@ -174,6 +174,10 @@ public class HttpServerTest {
     }
 
     protected ByteArrayOutputStream invokeServer(String request) {
+        // A request must include the blank line terminating its headers.
+        if (!request.contains("\r\n\r\n") && !request.contains("\n\n")) {
+            request += "\r\n\r\n";
+        }
         ByteArrayInputStream inputStream = new ByteArrayInputStream(request.getBytes());
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
         HTTPSession session = this.testServer.createSession(this.tempFileManager, inputStream, outputStream);

@@ -57,7 +57,7 @@ public class CookieHandlerTest extends HttpServerTest {
     @Test
     public void testCookieHeaderCorrectlyParsed() throws IOException {
         StringBuilder requestBuilder = new StringBuilder();
-        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1").append(System.getProperty("line.separator")).append("Cookie: theme=light; sessionToken=abc123");
+        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1\r\nCookie: theme=light; sessionToken=abc123\r\n\r\n");
 
         ByteArrayInputStream inputStream = new ByteArrayInputStream(requestBuilder.toString().getBytes());
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -79,8 +79,8 @@ public class CookieHandlerTest extends HttpServerTest {
     public void testCookieHeaderWithSpecialCharactersCorrectlyParsed() throws IOException {
         StringBuilder requestBuilder = new StringBuilder();
         // not including ; = and ,
-        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1").append(System.getProperty("line.separator"))
-                .append("Cookie: theme=light; sessionToken=abc123!@#$%^&*()-_+{}[]\\|:\"'<>.?/");
+        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1\r\n")
+                .append("Cookie: theme=light; sessionToken=abc123!@#$%^&*()-_+{}[]\\|:\"'<>.?/\r\n\r\n");
 
         ByteArrayInputStream inputStream = new ByteArrayInputStream(requestBuilder.toString().getBytes());
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -101,7 +101,7 @@ public class CookieHandlerTest extends HttpServerTest {
     @Test
     public void testUnloadQueue() throws IOException {
         StringBuilder requestBuilder = new StringBuilder();
-        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1").append(System.getProperty("line.separator")).append("Cookie: theme=light; sessionToken=abc123");
+        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1\r\nCookie: theme=light; sessionToken=abc123\r\n\r\n");
 
         ByteArrayInputStream inputStream = new ByteArrayInputStream(requestBuilder.toString().getBytes());
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
@@ -118,7 +118,7 @@ public class CookieHandlerTest extends HttpServerTest {
     @Test
     public void testDelete() throws IOException, ParseException {
         StringBuilder requestBuilder = new StringBuilder();
-        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1").append(System.getProperty("line.separator")).append("Cookie: theme=light; sessionToken=abc123");
+        requestBuilder.append("GET " + HttpServerTest.URI + " HTTP/1.1\r\nCookie: theme=light; sessionToken=abc123\r\n\r\n");
 
         ByteArrayInputStream inputStream = new ByteArrayInputStream(requestBuilder.toString().getBytes());
         ByteArrayOutputStream outputStream = new ByteArrayOutputStream();

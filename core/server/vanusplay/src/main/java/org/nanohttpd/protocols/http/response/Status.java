@@ -75,6 +75,7 @@ public enum Status implements IStatus {
     RANGE_NOT_SATISFIABLE(416, "Requested Range Not Satisfiable"),
     EXPECTATION_FAILED(417, "Expectation Failed"),
     TOO_MANY_REQUESTS(429, "Too Many Requests"),
+    REQUEST_HEADER_FIELDS_TOO_LARGE(431, "Request Header Fields Too Large"),
 
     INTERNAL_ERROR(500, "Internal Server Error"),
     NOT_IMPLEMENTED(501, "Not Implemented"),

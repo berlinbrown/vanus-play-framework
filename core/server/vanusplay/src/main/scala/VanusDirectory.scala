@@ -21,11 +21,11 @@ object VanusDirectory:
     null
 
   def listDirectory(uri: String, directory: File): String =
-    val heading = VanusConstants.DirectoryPrefix + uri
+    val heading = VanusSecurity.escapeHtml(VanusConstants.DirectoryPrefix + uri)
     val message = new StringBuilder("<html><head><title>").append(heading)
       .append("</title></head><body><h1>").append(heading).append("</h1><ul>")
-    Option(directory.listFiles).toSeq.flatten.sortBy(_.getName).foreach { file =>
+    Option(directory.listFiles).toSeq.flatten.filter(file => file.isDirectory || VanusSecurity.mimeType(file.getName).isDefined).sortBy(_.getName).foreach { file =>
       val name = file.getName + (if file.isDirectory then "/" else "")
-      message.append("<li><a href=\"").append(encodeUri(uri + name)).append("\">").append(name).append("</a></li>")
+      message.append("<li><a href=\"").append(VanusSecurity.escapeHtml(encodeUri(uri + name))).append("\">").append(VanusSecurity.escapeHtml(name)).append("</a></li>")
     }
     message.append("</ul></body></html>").toString

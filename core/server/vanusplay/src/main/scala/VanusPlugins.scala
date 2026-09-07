@@ -1,5 +1,4 @@
 import java.util.{Map, ServiceLoader}
-import org.nanohttpd.protocols.http.NanoHTTPD
 import org.nanohttpd.webserver.{WebServerPlugin, WebServerPluginInfo}
 
 object VanusPlugins:
@@ -16,12 +15,10 @@ object VanusPlugins:
       indexFileNames: java.util.List[String]): Unit =
     if mimeType == null || plugin == null then return
 
+    if !VanusSecurity.contentTypes.values.toSet.contains(mimeType) then return
     if indexFiles != null then
-      indexFiles.foreach { filename =>
-        val dot = filename.lastIndexOf('.')
-        if dot >= 0 then NanoHTTPD.mimeTypes().put(filename.substring(dot + 1).toLowerCase, mimeType)
-      }
-      indexFiles.foreach(indexFileNames.add)
+      indexFiles.filter(filename => filename != null && !filename.contains('/') && !filename.contains('\\') &&
+        VanusSecurity.mimeType(filename).contains("text/html")).foreach(indexFileNames.add)
 
     mimeTypeHandlers.put(mimeType, plugin)
     plugin.initialize(options)

@@ -111,6 +111,27 @@ public class HTTPSession implements IHTTPSession {
 
     private String protocolVersion;
 
+    private java.util.function.Consumer<ClientHandler.Phase> phaseListener = phase -> {};
+    private boolean lastRequest;
+    private long bodyRemaining;
+    private InputStream bodyStream;
+    private boolean bodyParsed;
+    private boolean bodyDeadlineStarted;
+    private boolean rawBodyAccessed;
+
+    public void setPhaseListener(java.util.function.Consumer<ClientHandler.Phase> listener) {
+        this.phaseListener = listener;
+    }
+
+    private void beginBody() {
+        if (!bodyDeadlineStarted) {
+            bodyDeadlineStarted = true;
+            phaseListener.accept(ClientHandler.Phase.BODY);
+        }
+    }
+
+    public void setLastRequest(boolean lastRequest) { this.lastRequest = lastRequest; }
+
     public HTTPSession(NanoHTTPD httpd, ITempFileManager tempFileManager, InputStream inputStream, OutputStream outputStream) {
         this.httpd = httpd;
         this.tempFileManager = tempFileManager;
@@ -150,14 +171,17 @@ public class HTTPSession implements IHTTPSession {
             }
 
             String uri = st.nextToken();
+            if (uri.chars().anyMatch(c -> c < 33 || c == 127)) {
+                throw new ResponseException(Status.BAD_REQUEST, "Invalid request target");
+            }
 
             // Decode parameters from the URI
             int qmi = uri.indexOf('?');
             if (qmi >= 0) {
                 decodeParms(uri.substring(qmi + 1), parms);
-                uri = NanoHTTPD.decodePercent(uri.substring(0, qmi));
+                uri = NanoHTTPD.decodePercent(uri.substring(0, qmi).replace("+", "%2B"));
             } else {
-                uri = NanoHTTPD.decodePercent(uri);
+                uri = NanoHTTPD.decodePercent(uri.replace("+", "%2B"));
             }
 
             // If there's another token, its protocol version,
@@ -166,6 +190,7 @@ public class HTTPSession implements IHTTPSession {
             // case insensitive and vary by client.
             if (st.hasMoreTokens()) {
                 protocolVersion = st.nextToken();
+                if (st.hasMoreTokens()) throw new ResponseException(Status.BAD_REQUEST, "Invalid request line");
             } else {
                 protocolVersion = "HTTP/1.1";
                 NanoHTTPD.LOG.log(Level.FINE, "no protocol version specified, strange. Assuming HTTP/1.1.");
@@ -173,12 +198,25 @@ public class HTTPSession implements IHTTPSession {
             String line = in.readLine();
             while (line != null && !line.trim().isEmpty()) {
                 int p = line.indexOf(':');
-                if (p >= 0) {
-                    headers.put(line.substring(0, p).trim().toLowerCase(Locale.US), line.substring(p + 1).trim());
+                if (p <= 0 || !line.substring(0, p).matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+")) {
+                    throw new ResponseException(Status.BAD_REQUEST, "Invalid header name");
                 }
+                String name = line.substring(0, p).toLowerCase(Locale.ROOT);
+                String value = line.substring(p + 1).trim();
+                if (value.chars().anyMatch(c -> (c < 32 && c != 9) || c == 127)) {
+                    throw new ResponseException(Status.BAD_REQUEST, "Invalid header value");
+                }
+                if (headers.containsKey(name) && (name.equals("content-length")
+                        || name.equals("transfer-encoding") || name.equals("host"))) {
+                    throw new ResponseException(Status.BAD_REQUEST, "Duplicate framing or host header");
+                }
+                headers.merge(name, value, (previous, next) -> previous + ", " + next);
                 line = in.readLine();
             }
 
+            if (!protocolVersion.equals("HTTP/1.1") && !protocolVersion.equals("HTTP/1.0")) {
+                throw new ResponseException(Status.UNSUPPORTED_HTTP_VERSION, "Unsupported HTTP version");
+            }
             pre.put("uri", uri);
         } catch (IOException ioe) {
             throw new ResponseException(Status.INTERNAL_ERROR, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage(), ioe);
@@ -192,6 +230,9 @@ public class HTTPSession implements IHTTPSession {
         int pcount = 0;
         try {
             int[] boundaryIdxs = getBoundaryPositions(fbuf, contentType.getBoundary().getBytes());
+            if (boundaryIdxs.length - 1 > httpd.getLimits().maxMultipartParts()) {
+                throw new ResponseException(Status.PAYLOAD_TOO_LARGE, "Too many multipart parts");
+            }
             if (boundaryIdxs.length < 2) {
                 throw new ResponseException(Status.BAD_REQUEST, "BAD REQUEST: Content type is multipart/form-data but contains less than two boundary strings.");
             }
@@ -338,20 +379,28 @@ public class HTTPSession implements IHTTPSession {
     @Override
     public void execute() throws IOException {
         Response r = null;
+        boolean responseStarted = false;
+        boolean handlerStarted = false;
+        this.queryParameterString = null;
+        this.bodyParsed = false;
+        this.bodyDeadlineStarted = false;
+        this.rawBodyAccessed = false;
+        this.bodyRemaining = 0;
+        this.bodyStream = null;
         try {
             // Read the first 8192 bytes.
             // The full header should fit in here.
             // Apache's default header limit is 8KB.
             // Do NOT assume that a single read will get the entire header
             // at once!
-            byte[] buf = new byte[HTTPSession.BUFSIZE];
+            byte[] buf = new byte[httpd.getLimits().maxHeaderBytes()];
             this.splitbyte = 0;
             this.rlen = 0;
 
             int read = -1;
-            this.inputStream.mark(HTTPSession.BUFSIZE);
+            this.inputStream.mark(buf.length);
             try {
-                read = this.inputStream.read(buf, 0, HTTPSession.BUFSIZE);
+                read = this.inputStream.read(buf, 0, buf.length);
             } catch (SSLException e) {
                 throw e;
             } catch (IOException e) {
@@ -365,15 +414,22 @@ public class HTTPSession implements IHTTPSession {
                 NanoHTTPD.safeClose(this.outputStream);
                 throw new SocketException("NanoHttpd Shutdown");
             }
+            phaseListener.accept(ClientHandler.Phase.HEADERS);
             while (read > 0) {
                 this.rlen += read;
                 this.splitbyte = findHeaderEnd(buf, this.rlen);
                 if (this.splitbyte > 0) {
                     break;
                 }
-                read = this.inputStream.read(buf, this.rlen, HTTPSession.BUFSIZE - this.rlen);
+                if (this.rlen == buf.length) {
+                    throw new ResponseException(Status.REQUEST_HEADER_FIELDS_TOO_LARGE, "Request headers too large");
+                }
+                read = this.inputStream.read(buf, this.rlen, buf.length - this.rlen);
             }
 
+            if (this.splitbyte == 0) {
+                throw new ResponseException(Status.BAD_REQUEST, "Incomplete request headers");
+            }
             if (this.splitbyte < this.rlen) {
                 this.inputStream.reset();
                 this.inputStream.skip(this.splitbyte);
@@ -404,6 +460,22 @@ public class HTTPSession implements IHTTPSession {
             }
 
             this.uri = pre.get("uri");
+            validateBodyFraming();
+            bodyStream = new InputStream() {
+                @Override public int read() throws IOException {
+                    byte[] one = new byte[1];
+                    return read(one, 0, 1) < 0 ? -1 : one[0] & 255;
+                }
+                @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+                    java.util.Objects.checkFromIndexSize(offset, length, bytes.length);
+                    if (length == 0) return 0;
+                    if (bodyRemaining == 0) return -1;
+                    int count = inputStream.read(bytes, offset, (int) Math.min(length, bodyRemaining));
+                    if (count < 0) throw new java.io.EOFException("Incomplete request body");
+                    bodyRemaining -= count;
+                    return count;
+                }
+            };
 
             this.cookies = new CookieHandler(this.headers);
 
@@ -412,16 +484,16 @@ public class HTTPSession implements IHTTPSession {
 
             // Ok, now do the serve()
 
-            // TODO: long body_size = getBodySize();
-            // TODO: long pos_before_serve = this.inputStream.totalRead()
-            // (requires implementation for totalRead())
+            phaseListener.accept(ClientHandler.Phase.HANDLER);
+            handlerStarted = true;
             r = httpd.handle(this);
-            // TODO: this.inputStream.skip(body_size -
-            // (this.inputStream.totalRead() - pos_before_serve))
+            // A handler may deliberately ignore a body. Close rather than interpret it as a new request.
+            keepAlive = keepAlive && bodyRemaining == 0 && !lastRequest;
 
             if (r == null) {
                 throw new ResponseException(Status.INTERNAL_ERROR, "SERVER INTERNAL ERROR: Serve() returned a null response.");
             } else {
+                r = httpd.prepareResponse(r);
                 String acceptEncoding = this.headers.get("accept-encoding");
                 this.cookies.unloadQueue(r);
                 r.setRequestMethod(this.method);
@@ -429,6 +501,8 @@ public class HTTPSession implements IHTTPSession {
                     r.setUseGzip(false);
                 }
                 r.setKeepAlive(keepAlive);
+                phaseListener.accept(ClientHandler.Phase.WRITE);
+                responseStarted = true;
                 r.send(this.outputStream);
             }
             if (!keepAlive || r.isCloseConnection()) {
@@ -442,21 +516,55 @@ public class HTTPSession implements IHTTPSession {
             // i.e. close the stream & finalAccept object by throwing the
             // exception up the call stack.
             throw ste;
+        } catch (java.io.EOFException eof) {
+            sendError(Status.BAD_REQUEST, "Incomplete request body");
+        } catch (IllegalArgumentException e) {
+            if (!responseStarted) sendError(handlerStarted ? Status.INTERNAL_ERROR : Status.BAD_REQUEST,
+                    handlerStarted ? "Internal server error" : "Malformed request");
+        } catch (RuntimeException e) {
+            NanoHTTPD.LOG.log(java.util.logging.Level.WARNING, "Request handler failed", e);
+            if (!responseStarted) sendError(Status.INTERNAL_ERROR, "Internal server error");
         } catch (SSLException ssle) {
-            Response resp = Response.newFixedLengthResponse(Status.INTERNAL_ERROR, NanoHTTPD.MIME_PLAINTEXT, "SSL PROTOCOL FAILURE: " + ssle.getMessage());
-            resp.send(this.outputStream);
-            NanoHTTPD.safeClose(this.outputStream);
+            throw ssle;
         } catch (IOException ioe) {
-            Response resp = Response.newFixedLengthResponse(Status.INTERNAL_ERROR, NanoHTTPD.MIME_PLAINTEXT, "SERVER INTERNAL ERROR: IOException: " + ioe.getMessage());
-            resp.send(this.outputStream);
-            NanoHTTPD.safeClose(this.outputStream);
+            if (!responseStarted) sendError(Status.INTERNAL_ERROR, "I/O failure");
         } catch (ResponseException re) {
-            Response resp = Response.newFixedLengthResponse(re.getStatus(), NanoHTTPD.MIME_PLAINTEXT, re.getMessage());
-            resp.send(this.outputStream);
-            NanoHTTPD.safeClose(this.outputStream);
+            if (!responseStarted) sendError(re.getStatus(), re.getMessage());
         } finally {
             NanoHTTPD.safeClose(r);
             this.tempFileManager.clear();
+        }
+    }
+
+    private void sendError(Status status, String message) {
+        phaseListener.accept(ClientHandler.Phase.WRITE);
+        Response response = Response.newFixedLengthResponse(status, NanoHTTPD.MIME_PLAINTEXT, message);
+        response.setRequestMethod(this.method);
+        response.closeConnection(true);
+        httpd.prepareResponse(response).send(this.outputStream);
+        NanoHTTPD.safeClose(response);
+        NanoHTTPD.safeClose(this.outputStream);
+    }
+
+    private void validateBodyFraming() throws ResponseException {
+        String length = headers.get("content-length");
+        if (headers.containsKey("transfer-encoding")) {
+            throw new ResponseException(length == null ? Status.NOT_IMPLEMENTED : Status.BAD_REQUEST,
+                    "Transfer-Encoding is not supported");
+        }
+        if (headers.containsKey("expect")) {
+            throw new ResponseException(Status.EXPECTATION_FAILED, "Expect is not supported");
+        }
+        if (length != null && !length.matches("[0-9]+")) {
+            throw new ResponseException(Status.BAD_REQUEST, "Invalid Content-Length");
+        }
+        try {
+            bodyRemaining = length == null ? 0 : Long.parseLong(length);
+        } catch (NumberFormatException e) {
+            throw new ResponseException(Status.BAD_REQUEST, "Invalid Content-Length");
+        }
+        if (bodyRemaining > httpd.getLimits().maxBodyBytes()) {
+            throw new ResponseException(Status.PAYLOAD_TOO_LARGE, "Request body too large");
         }
     }
 
@@ -487,7 +595,7 @@ public class HTTPSession implements IHTTPSession {
      * large block at a time and uses a temporary buffer to optimize (memory
      * mapped) file access.
      */
-    private int[] getBoundaryPositions(ByteBuffer b, byte[] boundary) {
+    private int[] getBoundaryPositions(ByteBuffer b, byte[] boundary) throws ResponseException {
         int[] res = new int[0];
         if (b.remaining() < boundary.length) {
             return res;
@@ -507,7 +615,9 @@ public class HTTPSession implements IHTTPSession {
                     if (search_window[j + i] != boundary[i])
                         break;
                     if (i == boundary.length - 1) {
-                        // Match found, add it to results
+                        if (res.length >= httpd.getLimits().maxMultipartParts() + 1) {
+                            throw new ResponseException(Status.PAYLOAD_TOO_LARGE, "Too many multipart parts");
+                        }
                         int[] new_res = new int[res.length + 1];
                         System.arraycopy(res, 0, new_res, 0, res.length);
                         new_res[res.length] = search_window_pos + j;
@@ -540,7 +650,9 @@ public class HTTPSession implements IHTTPSession {
 
     @Override
     public final InputStream getInputStream() {
-        return this.inputStream;
+        beginBody();
+        rawBodyAccessed = true;
+        return this.bodyStream;
     }
 
     @Override
@@ -556,7 +668,8 @@ public class HTTPSession implements IHTTPSession {
     public final Map<String, String> getParms() {
         Map<String, String> result = new HashMap<String, String>();
         for (String key : this.parms.keySet()) {
-            result.put(key, this.parms.get(key).get(0));
+            List<String> values = this.parms.get(key);
+            result.put(key, values.isEmpty() ? "" : values.get(0));
         }
 
         return result;
@@ -577,7 +690,7 @@ public class HTTPSession implements IHTTPSession {
             ITempFile tempFile = this.tempFileManager.createTempFile(null);
             return new RandomAccessFile(tempFile.getName(), "rw");
         } catch (Exception e) {
-            throw new Error(e); // we won't recover, so throw an error
+            throw new IllegalStateException("Temporary storage failed", e);
         }
     }
 
@@ -591,19 +704,21 @@ public class HTTPSession implements IHTTPSession {
      * bytes.
      */
     public long getBodySize() {
-        if (this.headers.containsKey("content-length")) {
-            return Long.parseLong(this.headers.get("content-length"));
-        } else if (this.splitbyte < this.rlen) {
-            return this.rlen - this.splitbyte;
-        }
-        return 0;
+        return headers.containsKey("content-length") ? Long.parseLong(headers.get("content-length")) : 0;
     }
 
     @Override
     public void parseBody(Map<String, String> files) throws IOException, ResponseException {
+        if (bodyParsed) throw new ResponseException(Status.BAD_REQUEST, "Body already parsed");
+        if (rawBodyAccessed) throw new ResponseException(Status.BAD_REQUEST, "Body stream already accessed");
+        bodyParsed = true;
+        beginBody();
+        if (!httpd.acquireBodyParser()) {
+            throw new ResponseException(Status.SERVICE_UNAVAILABLE, "Too many concurrent bodies");
+        }
         RandomAccessFile randomAccessFile = null;
         try {
-            long size = getBodySize();
+            long size = bodyRemaining;
             ByteArrayOutputStream baos = null;
             DataOutput requestDataOutput = null;
 
@@ -619,7 +734,7 @@ public class HTTPSession implements IHTTPSession {
             // Read all the body and write it to request_data_output
             byte[] buf = new byte[REQUEST_BUFFER_LEN];
             while (this.rlen >= 0 && size > 0) {
-                this.rlen = this.inputStream.read(buf, 0, (int) Math.min(size, REQUEST_BUFFER_LEN));
+                this.rlen = this.bodyStream.read(buf, 0, (int) Math.min(size, REQUEST_BUFFER_LEN));
                 size -= this.rlen;
                 if (this.rlen > 0) {
                     requestDataOutput.write(buf, 0, this.rlen);
@@ -630,8 +745,10 @@ public class HTTPSession implements IHTTPSession {
             if (baos != null) {
                 fbuf = ByteBuffer.wrap(baos.toByteArray(), 0, baos.size());
             } else {
-                fbuf = randomAccessFile.getChannel().map(FileChannel.MapMode.READ_ONLY, 0, randomAccessFile.length());
+                byte[] stored = new byte[(int) randomAccessFile.length()];
                 randomAccessFile.seek(0);
+                randomAccessFile.readFully(stored);
+                fbuf = ByteBuffer.wrap(stored);
             }
 
             // If the method is POST, there may be parameters
@@ -647,7 +764,7 @@ public class HTTPSession implements IHTTPSession {
                 } else {
                     byte[] postBytes = new byte[fbuf.remaining()];
                     fbuf.get(postBytes);
-                    String postLine = new String(postBytes, contentType.getEncoding()).trim();
+                    String postLine = new String(postBytes, contentType.getEncoding());
                     // Handle application/x-www-form-urlencoded
                     if ("application/x-www-form-urlencoded".equalsIgnoreCase(contentType.getContentType())) {
                         decodeParms(postLine, this.parms);
@@ -663,6 +780,7 @@ public class HTTPSession implements IHTTPSession {
             }
         } finally {
             NanoHTTPD.safeClose(randomAccessFile);
+            httpd.releaseBodyParser();
         }
     }
 
@@ -680,10 +798,11 @@ public class HTTPSession implements IHTTPSession {
                 fileOutputStream = new FileOutputStream(tempFile.getName());
                 FileChannel dest = fileOutputStream.getChannel();
                 src.position(offset).limit(offset + len);
-                dest.write(src.slice());
+                ByteBuffer content = src.slice();
+                while (content.hasRemaining()) dest.write(content);
                 path = tempFile.getName();
             } catch (Exception e) { // Catch exception if any
-                throw new Error(e); // we won't recover, so throw an error
+                throw new IllegalStateException("Temporary storage failed", e);
             } finally {
                 NanoHTTPD.safeClose(fileOutputStream);
             }

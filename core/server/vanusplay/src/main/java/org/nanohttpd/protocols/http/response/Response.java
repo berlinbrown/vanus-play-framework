@@ -44,6 +44,7 @@ import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.nio.charset.Charset;
 import java.nio.charset.CharsetEncoder;
+import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -90,7 +91,8 @@ public class Response implements Closeable {
     private final Map<String, String> header = new HashMap<String, String>() {
 
         public String put(String key, String value) {
-            lowerCaseHeader.put(key == null ? key : key.toLowerCase(), value);
+            keySet().removeIf(existing -> existing.equalsIgnoreCase(key));
+            lowerCaseHeader.put(key.toLowerCase(Locale.ROOT), value);
             return super.put(key, value);
         };
     };
@@ -156,6 +158,9 @@ public class Response implements Closeable {
      * an internal utility.
      */
     public void addCookieHeader(String cookie) {
+        if (cookie == null || cookie.indexOf('\r') >= 0 || cookie.indexOf('\n') >= 0) {
+            throw new IllegalArgumentException("Invalid cookie header");
+        }
         cookieHeaders.add(cookie);
     }
 
@@ -173,6 +178,10 @@ public class Response implements Closeable {
      * Adds given line to the header.
      */
     public void addHeader(String name, String value) {
+        if (name == null || !name.matches("[!#$%&'*+.^_`|~0-9A-Za-z-]+") || value == null
+                || value.chars().anyMatch(c -> (c < 32 && c != 9) || c == 127)) {
+            throw new IllegalArgumentException("Invalid response header");
+        }
         this.header.put(name, value);
     }
 
@@ -186,8 +195,10 @@ public class Response implements Closeable {
     public void closeConnection(boolean close) {
         if (close)
             this.header.put("connection", "close");
-        else
-            this.header.remove("connection");
+        else {
+            this.header.keySet().removeIf(key -> key.equalsIgnoreCase("connection"));
+            this.lowerCaseHeader.remove("connection");
+        }
     }
 
     /**
@@ -233,16 +244,23 @@ public class Response implements Closeable {
             if (this.status == null) {
                 throw new Error("sendResponse(): Status can't be null.");
             }
-            PrintWriter pw = new PrintWriter(new BufferedWriter(new OutputStreamWriter(outputStream, new ContentType(this.mimeType).getEncoding())), false);
+            PrintWriter pw = new PrintWriter(new BufferedWriter(
+                    new OutputStreamWriter(outputStream, StandardCharsets.ISO_8859_1)), false);
             pw.append("HTTP/1.1 ").append(this.status.getDescription()).append(" \r\n");
-            if (this.mimeType != null) {
+            int statusCode = this.status.getRequestStatus();
+            boolean bodyStatus = statusCode >= 200 && statusCode != 204 && statusCode != 304;
+            if (!bodyStatus) setUseGzip(false);
+            if (this.mimeType != null && getHeader("content-type") == null) {
                 printHeader(pw, "Content-Type", this.mimeType);
             }
             if (getHeader("date") == null) {
                 printHeader(pw, "Date", gmtFrmt.format(new Date()));
             }
             for (Entry<String, String> entry : this.header.entrySet()) {
-                printHeader(pw, entry.getKey(), entry.getValue());
+                if (bodyStatus || (!entry.getKey().equalsIgnoreCase("content-length")
+                        && !entry.getKey().equalsIgnoreCase("transfer-encoding"))) {
+                    printHeader(pw, entry.getKey(), entry.getValue());
+                }
             }
             for (String cookieHeader : this.cookieHeaders) {
                 printHeader(pw, "Set-Cookie", cookieHeader);
@@ -258,18 +276,27 @@ public class Response implements Closeable {
                 setChunkedTransfer(true);
             }
             long pending = this.data != null ? this.contentLength : 0;
-            if (this.requestMethod != Method.HEAD && this.chunkedTransfer) {
+            if (bodyStatus && this.requestMethod != Method.HEAD && this.chunkedTransfer) {
                 printHeader(pw, "Transfer-Encoding", "chunked");
-            } else if (!useGzipWhenAccepted()) {
+            } else if (bodyStatus && !useGzipWhenAccepted() && pending >= 0) {
                 pending = sendContentLengthHeaderIfNotAlreadyPresent(pw, pending);
             }
             pw.append("\r\n");
             pw.flush();
-            sendBodyWithCorrectTransferAndEncoding(outputStream, pending);
+            if (pw.checkError()) {
+                throw new IOException("Could not write response headers");
+            }
+            if (this.requestMethod != Method.HEAD && bodyStatus) {
+                sendBodyWithCorrectTransferAndEncoding(outputStream, pending);
+            }
             outputStream.flush();
             NanoHTTPD.safeClose(this.data);
         } catch (IOException ioe) {
-            NanoHTTPD.LOG.log(Level.SEVERE, "Could not send response to the client", ioe);
+            closeConnection(true);
+            NanoHTTPD.LOG.log(Level.FINE, "Client response could not be completed", ioe);
+            NanoHTTPD.safeClose(outputStream);
+        } finally {
+            NanoHTTPD.safeClose(this.data);
         }
     }
 
@@ -297,13 +324,7 @@ public class Response implements Closeable {
         if (this.requestMethod != Method.HEAD && this.chunkedTransfer) {
             ChunkedOutputStream chunkedOutputStream = new ChunkedOutputStream(outputStream);
             sendBodyWithCorrectEncoding(chunkedOutputStream, -1);
-            try {
-                chunkedOutputStream.finish();
-            } catch (Exception e) {
-                if (this.data != null) {
-                    this.data.close();
-                }
-            }
+            chunkedOutputStream.finish();
         } else {
             sendBodyWithCorrectEncoding(outputStream, pending);
         }
@@ -311,18 +332,9 @@ public class Response implements Closeable {
 
     private void sendBodyWithCorrectEncoding(OutputStream outputStream, long pending) throws IOException {
         if (useGzipWhenAccepted()) {
-            GZIPOutputStream gzipOutputStream = null;
-            try {
-                gzipOutputStream = new GZIPOutputStream(outputStream);
-            } catch (Exception e) {
-                if (this.data != null) {
-                    this.data.close();
-                }
-            }
-            if (gzipOutputStream != null) {
-                sendBody(gzipOutputStream, -1);
-                gzipOutputStream.finish();
-            }
+            GZIPOutputStream gzipOutputStream = new GZIPOutputStream(outputStream);
+            sendBody(gzipOutputStream, -1);
+            gzipOutputStream.finish();
         } else {
             sendBody(outputStream, pending);
         }
@@ -351,13 +363,7 @@ public class Response implements Closeable {
             if (read <= 0) {
                 break;
             }
-            try {
-                outputStream.write(buff, 0, read);
-            } catch (Exception e) {
-                if (this.data != null) {
-                    this.data.close();
-                }
-            }
+            outputStream.write(buff, 0, read);
             if (!sendEverything) {
                 pending -= read;
             }

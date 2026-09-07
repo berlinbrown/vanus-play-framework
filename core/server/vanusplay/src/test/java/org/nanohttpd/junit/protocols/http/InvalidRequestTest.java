@@ -63,7 +63,7 @@ public class InvalidRequestTest extends HttpServerTest {
 
     @Test
     public void testPostRequestWithoutProtocol() {
-        invokeServer("POST " + HttpServerTest.URI + "\r\nContent-Length: 123");
+        invokeServer("POST " + HttpServerTest.URI + "\r\nContent-Length: 0");
         assertNotNull(this.testServer.parms);
         assertNotNull(this.testServer.parameters);
         assertTrue(this.testServer.header.size() > 0);
@@ -73,7 +73,7 @@ public class InvalidRequestTest extends HttpServerTest {
 
     @Test
     public void testPostRequestWithProtocol() {
-        invokeServer("POST " + HttpServerTest.URI + " HTTP/1.1\r\nContent-Length: 123");
+        invokeServer("POST " + HttpServerTest.URI + " HTTP/1.1\r\nContent-Length: 0");
         assertNotNull(this.testServer.parms);
         assertNotNull(this.testServer.parameters);
         assertTrue(this.testServer.header.size() > 0);

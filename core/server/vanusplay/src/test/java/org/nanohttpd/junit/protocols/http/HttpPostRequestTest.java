@@ -38,6 +38,7 @@ import static org.junit.Assert.assertEquals;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -76,10 +77,7 @@ public class HttpPostRequestTest extends HttpServerTest {
         String content =
                 "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD + "\"; filename=\"" + fileName + "\"\r\n"
                         + "Content-Type: image/jpeg\r\n" + "\r\n" + fileContent + "\r\n" + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 5) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
 
         return input;
     }
@@ -124,10 +122,7 @@ public class HttpPostRequestTest extends HttpServerTest {
                 "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE + "\r\n"
                         + "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD2 + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE2
                         + "\r\n" + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
 
         assertEquals(2, this.testServer.parms.size());
@@ -147,10 +142,7 @@ public class HttpPostRequestTest extends HttpServerTest {
                 "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE + "\r\n"
                         + "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD2 + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE2
                         + "\r\n" + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
 
         assertEquals(2, this.testServer.parms.size());
@@ -169,10 +161,7 @@ public class HttpPostRequestTest extends HttpServerTest {
         String content =
                 "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE + "\r\n"
                         + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
 
         assertEquals(1, this.testServer.parms.size());
@@ -185,11 +174,8 @@ public class HttpPostRequestTest extends HttpServerTest {
     @Test
     public void testSimpleRawPostData() throws Exception {
         String header = "POST " + HttpServerTest.URI + " HTTP/1.1\n";
-        String content = HttpPostRequestTest.VALUE_TEST_SIMPLE_RAW_DATA_WITH_AMPHASIS + "\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String content = HttpPostRequestTest.VALUE_TEST_SIMPLE_RAW_DATA_WITH_AMPHASIS;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
         assertEquals(0, this.testServer.parms.size());
         assertEquals(0, this.testServer.parameters.size());
@@ -208,10 +194,7 @@ public class HttpPostRequestTest extends HttpServerTest {
                 "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\"" + HttpPostRequestTest.FIELD + "\"; filename=\"" + fileName + "\"\r\n"
                         + "Content-Type: image/jpeg\r\n" + "\r\n" + fileContent + "\r\n" + "--" + divider + "\r\n" + "Content-Disposition: form-data; name=\""
                         + HttpPostRequestTest.FIELD2 + "\"\r\n" + "\r\n" + HttpPostRequestTest.VALUE2 + "\r\n" + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
 
         assertEquals("Parms count did not match.", 2, this.testServer.parms.size());
@@ -244,10 +227,7 @@ public class HttpPostRequestTest extends HttpServerTest {
                 + file2Content + "\r\n" //
                 + "\r\n" //
                 + "--" + divider + "--\r\n";
-        int size = content.length() + header.length();
-        int contentLengthHeaderValueSize = String.valueOf(size).length();
-        int contentLength = size + contentLengthHeaderValueSize + HttpPostRequestTest.CONTENT_LENGTH.length();
-        String input = header + HttpPostRequestTest.CONTENT_LENGTH + (contentLength + 4) + "\r\n\r\n" + content;
+        String input = header + HttpPostRequestTest.CONTENT_LENGTH + content.getBytes(StandardCharsets.UTF_8).length + "\r\n\r\n" + content;
         invokeServer(input);
 
         assertEquals("Parm count did not match.", 2, this.testServer.parms.size());

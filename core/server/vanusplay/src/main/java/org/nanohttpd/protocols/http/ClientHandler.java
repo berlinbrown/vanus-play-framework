@@ -59,36 +59,76 @@ public class ClientHandler implements Runnable {
         this.acceptSocket = acceptSocket;
     }
 
+    public enum Phase { IDLE, HEADERS, HANDLER, BODY, WRITE }
+
+    private volatile long deadlineNanos = Long.MAX_VALUE;
+    private volatile long requestDeadlineNanos = Long.MAX_VALUE;
+    private volatile Phase phase = Phase.IDLE;
+    private volatile boolean draining;
+    private volatile Thread worker;
+
     public void close() {
-        NanoHTTPD.safeClose(this.inputStream);
+        // Close the socket first: closing a buffered stream can wait on a blocked reader.
         NanoHTTPD.safeClose(this.acceptSocket);
+        Thread thread = worker;
+        if (thread != null && thread != Thread.currentThread()) thread.interrupt();
+    }
+
+    public synchronized void beginPhase(Phase next) {
+        phase = next;
+        HttpLimits limits = httpd.getLimits();
+        long now = System.nanoTime();
+        int timeout = switch (next) {
+            case IDLE -> limits.idleTimeoutMillis();
+            case HEADERS -> limits.headerTimeoutMillis();
+            case HANDLER -> limits.requestTimeoutMillis();
+            case BODY -> limits.bodyTimeoutMillis();
+            case WRITE -> limits.writeTimeoutMillis();
+        };
+        if (next == Phase.HANDLER) requestDeadlineNanos = now + timeout * 1_000_000L;
+        if (next == Phase.IDLE) requestDeadlineNanos = Long.MAX_VALUE;
+        deadlineNanos = now + timeout * 1_000_000L;
+        if (next == Phase.BODY || next == Phase.HANDLER) {
+            deadlineNanos = Math.min(deadlineNanos, requestDeadlineNanos);
+        }
+        if (draining && (next == Phase.IDLE || next == Phase.HEADERS)) close();
+    }
+
+    public synchronized void expireIfOverdue(long nowNanos) {
+        if (deadlineNanos != Long.MAX_VALUE && nowNanos - deadlineNanos >= 0) close();
+    }
+
+    public synchronized void drain() {
+        draining = true;
+        if (phase == Phase.IDLE || phase == Phase.HEADERS) close();
     }
 
     @Override
     public void run() {
+        worker = Thread.currentThread();
         OutputStream outputStream = null;
         try {
             outputStream = this.acceptSocket.getOutputStream();
             ITempFileManager tempFileManager = httpd.getTempFileManagerFactory().create();
-            HTTPSession session = new HTTPSession(httpd, tempFileManager, this.inputStream, outputStream, this.acceptSocket.getInetAddress());
-            while (!this.acceptSocket.isClosed()) {
+            HTTPSession session = new HTTPSession(httpd, tempFileManager, this.inputStream,
+                    outputStream, this.acceptSocket.getInetAddress());
+            session.setPhaseListener(this::beginPhase);
+            int requests = 0;
+            while (!this.acceptSocket.isClosed() && !draining) {
+                beginPhase(Phase.IDLE);
+                session.setLastRequest(++requests >= httpd.getLimits().maxRequestsPerConnection());
                 session.execute();
             }
         } catch (Exception e) {
-            // When the socket is closed by the client,
-            // we throw our own SocketException
-            // to break the "keep alive" loop above. If
-            // the exception was anything other
-            // than the expected SocketException OR a
-            // SocketTimeoutException, print the
-            // stacktrace
-            if (!(e instanceof SocketException && "NanoHttpd Shutdown".equals(e.getMessage())) && !(e instanceof SocketTimeoutException)) {
-                NanoHTTPD.LOG.log(Level.SEVERE, "Communication with the client broken, or an bug in the handler code", e);
+            if (!(e instanceof SocketException) && !(e instanceof SocketTimeoutException)
+                    && !(e instanceof InterruptedException)) {
+                NanoHTTPD.LOG.log(Level.WARNING, "Connection handler failed", e);
             }
         } finally {
+            NanoHTTPD.safeClose(this.acceptSocket);
             NanoHTTPD.safeClose(outputStream);
             NanoHTTPD.safeClose(this.inputStream);
-            NanoHTTPD.safeClose(this.acceptSocket);
+            worker = null;
             httpd.asyncRunner.closed(this);
         }
     }

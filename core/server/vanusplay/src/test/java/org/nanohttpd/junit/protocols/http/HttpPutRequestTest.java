@@ -46,7 +46,8 @@ public class HttpPutRequestTest extends HttpServerTest {
 
     @Test
     public void testPutRequestSendsContent() throws Exception {
-        ByteArrayOutputStream outputStream = invokeServer("PUT " + HttpServerTest.URI + " HTTP/1.1\r\n\r\nBodyData 1\nLine 2");
+        ByteArrayOutputStream outputStream = invokeServer("PUT " + HttpServerTest.URI
+                + " HTTP/1.1\r\nContent-Length: 17\r\n\r\nBodyData 1\nLine 2");
 
         String[] expectedOutput = {
             "HTTP/1.1 200 OK",
