@@ -31,8 +31,7 @@ class GeneralHandler extends DefaultHandler:
   override def getMimeType: String = "text/html"
   override def getStatus: IStatus = Status.OK
   override def getCustomHeaders: Map[String, String] = Map(
-    VanusConstants.HeaderXServerVanusInfo -> VanusConstants.VanusVersionValue,
-    VanusConstants.HeaderContentSecurityPolicy -> VanusConstants.ContentSecurityPolicyValue
+    VanusConstants.HeaderXServerVanusInfo -> VanusConstants.VanusVersionValue
   )
 
   override def getText(session: IHTTPSession): String =

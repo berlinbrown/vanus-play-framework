@@ -57,15 +57,27 @@ class MySuite extends munit.FunSuite:
   test("messages page renders escaped API content with no script") {
     val json = """{"vanus":{"messages":[{"message":"hello <script>alert(1)</script>","timestamp":"2026-09-21T22:01:56Z","id":"144","role":"response"}]}}"""
     val handler = new VanusHomeMessagesHandler("http://unused", "secret", (_, _) => json)
-    val response = handler.get(null)
+    val response = VanusSecurity.protect(handler.get(null))
     val body = new String(response.getData.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
 
     assertEquals(response.getStatus, Status.OK)
     assertEquals(response.getHeader("cache-control"), "no-store")
-    assert(response.getHeader("content-security-policy").contains("script-src 'none'"))
+    assertEquals(response.getHeader("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
     assert(body.contains("hello &lt;script&gt;alert(1)&lt;/script&gt;"))
     assert(!body.contains("<script>"))
+    assert(!body.contains("<style>"))
+    assert(body.contains("href=\"/vanus-home-messages.css\""))
     assert(body.contains("144"))
+  }
+
+  test("messages stylesheet is served from the same origin") {
+    val response = VanusSecurity.protect(VanusHomeMessagesCssHandler.get(null))
+    val body = new String(response.getData.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+
+    assertEquals(response.getStatus, Status.OK)
+    assert(response.getMimeType.startsWith("text/css"))
+    assertEquals(response.getHeader("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
+    assert(body.contains("color-scheme:light"))
   }
 
   test("messages page returns a styled service error for invalid JSON") {

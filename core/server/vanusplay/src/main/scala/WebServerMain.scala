@@ -35,10 +35,10 @@ object WebServerMain:
       limits = config.limits,
       plugins = plugins.asScala.toMap,
       indexNames = indices.asScala.toVector,
-      routes = VanusRoutes.snapshot.updated(
-        (Method.GET, VanusHomeMessagesHandler.Path),
-        new VanusHomeMessagesHandler(config.messagesUrl, config.messagesToken)
-      )
+      routes = VanusRoutes.snapshot
+        .updated((Method.GET, VanusHomeMessagesHandler.Path),
+          new VanusHomeMessagesHandler(config.messagesUrl, config.messagesToken))
+        .updated((Method.GET, VanusHomeMessagesHandler.CssPath), VanusHomeMessagesCssHandler)
     )
     VanusRuntime.run(server)
 

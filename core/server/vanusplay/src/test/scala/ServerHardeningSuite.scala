@@ -81,7 +81,7 @@ class ServerHardeningSuite extends munit.FunSuite:
       for (path, method) <- Seq(("/index.html", "GET"), ("/index.html", "HEAD"),
           ("/docs", "GET"), ("/docs/", "GET"), ("/missing", "GET")) do
         val response = get(server, path, method = method)
-        assert(response.headers("content-security-policy").contains("script-src 'none'"))
+        assertEquals(response.headers("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
         assertEquals(response.headers("x-content-type-options"), "nosniff")
       val listing = get(server, "/docs/")
       assert(listing.body.contains("&lt;unsafe&gt;.txt"))
@@ -158,7 +158,7 @@ class ServerHardeningSuite extends munit.FunSuite:
         val response = get(server, "/test.txt", headers)
         assertEquals(response.status, expected)
         assertEquals(response.headers("connection"), "close")
-        assert(response.headers("content-security-policy").contains("script-src 'none'"))
+        assertEquals(response.headers("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
       assertEquals(get(server, "/test.txt", "X-Large: " + "x" * 8200 + "\r\n").status, 431)
     }
   }

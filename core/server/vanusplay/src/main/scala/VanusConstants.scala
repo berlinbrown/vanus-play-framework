@@ -60,9 +60,10 @@ object VanusConstants:
  
   val VanusVersionValue = "\"vers 0.1\""
   val ContentSecurityPolicyValue =
-    "default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; " +
-      "object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; " +
-      "form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin"
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+      "connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'none'; " +
+      "frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'self'; " +
+      "frame-ancestors 'none'; upgrade-insecure-requests;"
 
   val ErrorForbiddenTraversal = "Won't serve ../ for security reasons."
   val ErrorNoDirectoryListing = "No directory listing."

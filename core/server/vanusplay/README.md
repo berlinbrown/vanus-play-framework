@@ -96,12 +96,12 @@ Every response from the Vanus server, including parser errors, redirects, partia
 responses, and plugin responses, receives `X-Content-Type-Options: nosniff` and this CSP:
 
 ```text
-default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; object-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; sandbox allow-same-origin
+default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'none'; frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests;
 ```
 
-HTML/HTM is served as HTML, with JavaScript blocked by the browser's CSP enforcement.
-Inline scripts, external scripts, event handlers, workers, and embedded frames are
-not permitted. Local CSS and inline styles remain available. Forms are disabled.
+HTML/HTM is served as HTML. Scripts, styles, images, connections, fonts, and form
+submissions are restricted to the same origin; inline scripts, inline styles, objects,
+media, workers, and embedded frames are not permitted. HTTP subresources are upgraded.
 This does not remove script text from downloaded files; the policy applies when a
 browser loads a response from this server. Generated HTML also escapes filenames
 and paths. Document roots should be writable only by trusted local users; canonical
