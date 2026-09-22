@@ -32,6 +32,20 @@ Arguments are passed to `WebServerMain`, for example:
 ./scripts/launch-local.sh -p 8080 -d .
 ```
 
+For configurable Java/JAR locations, repeatable document roots, and an optional
+build step, use the path-aware launcher:
+
+```bash
+./scripts/van.sh --build --doc-root ./public -p 8080
+./scripts/van.sh --jar /opt/vanus/vanusplay.jar --doc-root /srv/vanus/public
+```
+
+Run `./scripts/van.sh --help` for all launcher options and environment variables.
+Arguments not handled by the launcher are passed through to the server.
+The launcher requires Java 21 or newer. Its `--build` option performs a clean build,
+runs the complete test suite, and creates the self-contained deployment JAR before
+starting it.
+
 Useful flags:
 
 - `-h` / `--host` — bind address (defaults to `127.0.0.1`, localhost only; pass a LAN address to share)
@@ -39,6 +53,15 @@ Useful flags:
 - `--cors` / `--cors=origin` — enable CORS headers
 - `--dir-listing` — list directory contents when no index file exists (off by default)
 - `--rate-limit <n>` — allow at most `n` requests per client IP per 10-second window (off by default); excess requests get `429 Too Many Requests`
+- `--messages-url <url>` — JSON service used by `/vanus-home-messages.van`
+- `--messages-token <token>` — token sent to that service as the `token` query parameter
+
+The messages page is server rendered and contains inline CSS but no JavaScript. Its
+defaults point to the local Vanus bot service on port 8086. To override them:
+
+```bash
+./scripts/launch-local.sh --messages-url http://127.0.0.1:8086/_vanus-ops-manage/_vanus-bot-messages --messages-token your-token
+```
 
 ### Test coverage
 
@@ -55,6 +78,9 @@ The summary prints statement and branch coverage, and reports are written to
 
 Vanus uses ordinary Scala and Java 21 APIs. No preview features, additional runtime
 libraries, or compiler extensions are required. The Java 21 bytecode target is unchanged.
+The build machine may use JDK 21 or any newer JDK because Scala and Java compilation
+both use release target 21. The deployment machine only needs a Java 21+ runtime;
+sbt, Scala, and a JDK are not required there.
 
 Only these file extensions are served (case insensitive):
 

@@ -43,6 +43,40 @@ class MySuite extends munit.FunSuite:
     assertEquals(config.options.get("host"), Some("127.0.0.1"))
   }
 
+  test("server config parses messages service settings") {
+    val config = VanusServerConfig.fromArgs(Array(
+      "--messages-url", "http://localhost:9000/messages",
+      "--messages-token", "test token"
+    ))
+
+    assertEquals(config.messagesUrl, "http://localhost:9000/messages")
+    assertEquals(config.messagesToken, "test token")
+    assert(!config.options.values.exists(_.contains("test token")))
+  }
+
+  test("messages page renders escaped API content with no script") {
+    val json = """{"vanus":{"messages":[{"message":"hello <script>alert(1)</script>","timestamp":"2026-09-21T22:01:56Z","id":"144","role":"response"}]}}"""
+    val handler = new VanusHomeMessagesHandler("http://unused", "secret", (_, _) => json)
+    val response = handler.get(null)
+    val body = new String(response.getData.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+
+    assertEquals(response.getStatus, Status.OK)
+    assertEquals(response.getHeader("cache-control"), "no-store")
+    assert(response.getHeader("content-security-policy").contains("script-src 'none'"))
+    assert(body.contains("hello &lt;script&gt;alert(1)&lt;/script&gt;"))
+    assert(!body.contains("<script>"))
+    assert(body.contains("144"))
+  }
+
+  test("messages page returns a styled service error for invalid JSON") {
+    val handler = new VanusHomeMessagesHandler("http://unused", "secret", (_, _) => "not json")
+    val response = handler.get(null)
+    val body = new String(response.getData.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
+
+    assertEquals(response.getStatus, Status.SERVICE_UNAVAILABLE)
+    assert(body.contains("Messages unavailable"))
+  }
+
   test("server config supports cors wildcard shorthand") {
     val config = VanusServerConfig.fromArgs(Array("--cors"))
 

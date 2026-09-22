@@ -34,7 +34,11 @@ object WebServerMain:
       maxTempBytes = config.maxTempBytes,
       limits = config.limits,
       plugins = plugins.asScala.toMap,
-      indexNames = indices.asScala.toVector
+      indexNames = indices.asScala.toVector,
+      routes = VanusRoutes.snapshot.updated(
+        (Method.GET, VanusHomeMessagesHandler.Path),
+        new VanusHomeMessagesHandler(config.messagesUrl, config.messagesToken)
+      )
     )
     VanusRuntime.run(server)
 

@@ -13,6 +13,7 @@ lazy val root = project
     Compile / javacOptions ++= Seq("--release", "21"),
 
     libraryDependencies ++= Seq(
+      "com.lihaoyi" %% "upickle" % "4.4.2",
       "org.scalameta" %% "munit" % "1.3.4" % Test,
       "com.github.sbt" % "junit-interface" % "0.13.3" % Test,
       "junit" % "junit" % "4.13.2" % Test,

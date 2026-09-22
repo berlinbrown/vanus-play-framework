@@ -9,6 +9,8 @@ final case class VanusServerConfig(
     rateLimit: Option[Int],
     cors: Option[String],
     rootDirs: Vector[File],
+    messagesUrl: String = "http://127.0.0.1:8086/_vanus-ops-manage/_vanus-bot-messages",
+    messagesToken: String = "dmFudXMtc2NhdHR5LW9wcy0yMDI2",
     maxConnections: Int = 256,
     maxInFlight: Int = 32,
     shutdownMillis: Int = 10000,
@@ -52,6 +54,11 @@ object VanusServerConfig:
         case "--max-in-flight" => config = config.copy(maxInFlight = number(flag, 100000))
         case "--shutdown-ms" => config = config.copy(shutdownMillis = number(flag))
         case "--max-temp-bytes" => config = config.copy(maxTempBytes = number(flag).toLong)
+        case "--messages-url" =>
+          val url = value(flag)
+          require(url.startsWith("http://") || url.startsWith("https://"), "Messages URL must use http or https")
+          config = config.copy(messagesUrl = url)
+        case "--messages-token" => config = config.copy(messagesToken = value(flag))
         case "--max-header-bytes" => limits = copyLimits(limits, headerBytes = number(flag, 65536))
         case "--max-body-bytes" => limits = copyLimits(limits, bodyBytes = number(flag, 16 * 1024 * 1024))
         case "--max-multipart-parts" => limits = copyLimits(limits, parts = number(flag, 1024))
