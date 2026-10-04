@@ -1,0 +1,80 @@
+/**
+ * VanusPlayFramework-FileCopyrightText: 2026 - Berlin Brown <myberlinaustin _at_ proton me>
+ * VanusPlayFramework-License-Identifier: Refer to LICENSE file (MIT)
+ */
+
+object VanusConstants:
+  // Main Port setting
+  val DefaultPort = 8085
+  val DefaultHost = "127.0.0.1"
+
+
+  // Main Argument Settings
+  val ArgPort = "-p"
+  val ArgPortLong = "--port"
+  val ArgHost = "-h"
+  val ArgHostLong = "--host"
+  val ArgQuiet = "-q"
+  val ArgQuietLong = "--quiet"
+  val ArgDirListing = "--dir-listing"
+  val ArgRateLimit = "--rate-limit"
+  val ArgDir = "-d"
+  val ArgDirLong = "--dir"
+  val ArgCors = "--cors"
+
+  // Additional Option Settings
+  val OptionHost = "host"
+  val OptionPort = "port"
+  val OptionQuiet = "quiet"
+  val OptionDirListing = "dir-listing"
+  val OptionRateLimit = "rate-limit"
+  val OptionHome = "home"
+
+  // Rate limiting
+  val RateLimitWindowMillis = 10000L
+
+  // Default Index Files
+  val DefaultIndexHtml = "index.html"
+  val DefaultIndexHtm = "index.htm"
+
+  // Header Setting Accept
+  val HeaderAcceptRanges = "Accept-Ranges"
+  val HeaderLocation = "Location"
+  val HeaderContentLength = "Content-Length"
+  val HeaderContentRange = "Content-Range"
+  val HeaderETag = "ETag"
+  val HeaderIfNoneMatch = "if-none-match"
+  val HeaderRange = "range"
+
+  // True server info - X-Server-Vanus-Info
+  val HeaderXServerVanusInfo = "X-Server-Z-Info"
+  val HeaderContentSecurityPolicy = "Content-Security-Policy"
+  val HeaderAccessControlAllowOrigin = "Access-Control-Allow-Origin"
+  val HeaderAccessControlAllowHeaders = "Access-Control-Allow-Headers"
+  val HeaderAccessControlAllowCredentials = "Access-Control-Allow-Credentials"
+  val HeaderAccessControlAllowMethods = "Access-Control-Allow-Methods"
+  val HeaderAccessControlMaxAge = "Access-Control-Max-Age"
+
+  // CORS (Cross-Origin Resource Sharing) Settings
+  val CorsAllowedHeadersProperty = "AccessControlAllowHeader"
+  val CorsAllowedHeadersDefault = "origin,accept,content-type"
+  val CorsAllowCredentialsValue = "true"
+  val CorsAllowMethodsValue = "GET, HEAD, OPTIONS"
+  val CorsWildcard = "*"
+  val CorsMaxAgeSeconds = 151200
+ 
+  val VanusVersionValue = "\"vers 0.1\""
+  val ContentSecurityPolicyValue =
+    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+      "connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'none'; " +
+      "frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'self'; " +
+      "frame-ancestors 'none'; upgrade-insecure-requests;"
+
+  val ErrorForbiddenTraversal = "Won't serve ../ for security reasons."
+  val ErrorNoDirectoryListing = "No directory listing."
+  val ErrorReadingFileFailed = "Reading file failed."
+  val ErrorForbiddenPrefix = "FORBIDDEN: "
+  val ErrorInternalPrefix = "INTERNAL ERROR: "
+  val ErrorNotFound = "Error 404, file not found."
+
+  val DirectoryPrefix = "Directory "

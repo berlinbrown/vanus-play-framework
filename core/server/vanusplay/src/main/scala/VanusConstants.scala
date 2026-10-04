@@ -60,7 +60,7 @@ object VanusConstants:
  
   val VanusVersionValue = "\"vers 0.1\""
   val ContentSecurityPolicyValue =
-    "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; " +
+    s"default-src 'none'; script-src 'self'; style-src 'self' '${VanusHomeMessagesStyles.CspHash}'; img-src 'self'; " +
       "connect-src 'self'; font-src 'self'; object-src 'none'; media-src 'none'; " +
       "frame-src 'none'; worker-src 'none'; base-uri 'none'; form-action 'self'; " +
       "frame-ancestors 'none'; upgrade-insecure-requests;"

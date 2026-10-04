@@ -38,7 +38,6 @@ object WebServerMain:
       routes = VanusRoutes.snapshot
         .updated((Method.GET, VanusHomeMessagesHandler.Path),
           new VanusHomeMessagesHandler(config.messagesUrl, config.messagesToken))
-        .updated((Method.GET, VanusHomeMessagesHandler.CssPath), VanusHomeMessagesCssHandler)
     )
     VanusRuntime.run(server)
 

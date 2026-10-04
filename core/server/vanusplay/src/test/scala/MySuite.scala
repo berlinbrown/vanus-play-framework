@@ -65,19 +65,16 @@ class MySuite extends munit.FunSuite:
     assertEquals(response.getHeader("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
     assert(body.contains("hello &lt;script&gt;alert(1)&lt;/script&gt;"))
     assert(!body.contains("<script>"))
-    assert(!body.contains("<style>"))
-    assert(body.contains("href=\"/vanus-home-messages.css\""))
+    assert(body.contains("<style>"))
+    assert(body.contains(VanusHomeMessagesStyles.Css))
+    assert(!body.contains("href=\"/vanus-home-messages.css\""))
     assert(body.contains("144"))
   }
 
-  test("messages stylesheet is served from the same origin") {
-    val response = VanusSecurity.protect(VanusHomeMessagesCssHandler.get(null))
-    val body = new String(response.getData.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
-
-    assertEquals(response.getStatus, Status.OK)
-    assert(response.getMimeType.startsWith("text/css"))
-    assertEquals(response.getHeader("content-security-policy"), VanusConstants.ContentSecurityPolicyValue)
-    assert(body.contains("color-scheme:light"))
+  test("messages stylesheet hash is authorized by CSP") {
+    assert(VanusConstants.ContentSecurityPolicyValue.contains(
+      s"style-src 'self' '${VanusHomeMessagesStyles.CspHash}'"
+    ))
   }
 
   test("messages page returns a styled service error for invalid JSON") {
